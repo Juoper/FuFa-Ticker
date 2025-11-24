@@ -56,8 +56,6 @@ jobs:
           tags: |
             ${{ vars.DOCKER_REGISTRY_URL }}/fufa:${{ steps.meta.outputs.tag }}
             ${{ vars.DOCKER_REGISTRY_URL }}/fufa:${{ steps.meta.outputs.short_sha }}
-          cache-from: type=registry,ref=${{ vars.DOCKER_REGISTRY_URL }}/fufa:buildcache
-          cache-to: type=registry,ref=${{ vars.DOCKER_REGISTRY_URL }}/fufa:buildcache,mode=max
 
       - name: Image digest
         run: echo "Image pushed successfully with tag ${{ steps.meta.outputs.tag }}"
