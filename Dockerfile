@@ -46,4 +46,4 @@ ENV DATABASE_URL="file:./prisma/dev.db"
 EXPOSE 3000
 
 # Run migrations and start the server
-CMD npx prisma migrate deploy && npm run start
+CMD sh -c "ls -la /app/prisma && npx prisma migrate deploy --schema=/app/prisma/schema.prisma && npm run start"
