@@ -1,0 +1,68 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  isAdmin   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  posts     Post[]
+  memes     Meme[]
+  memeVotes MemeVote[]
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  content   String
+  userId    String
+  parentId  String?
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Post?    @relation("PostReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Post[]   @relation("PostReplies")
+  
+  @@index([parentId])
+  @@index([userId])
+}
+
+model Meme {
+  id         String   @id @default(cuid())
+  imageUrl   String
+  templateId String?
+  caption    String   // JSON string of text boxes
+  userId     String
+  upvotes    Int      @default(0)
+  downvotes  Int      @default(0)
+  createdAt  DateTime @default(now())
+  
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  votes      MemeVote[]
+  
+  @@index([userId])
+}
+
+model MemeVote {
+  id       String @id @default(cuid())
+  memeId   String
+  userId   String
+  voteType String // "up" or "down"
+  
+  meme     Meme   @relation(fields: [memeId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([memeId, userId])
+  @@index([memeId])
+  @@index([userId])
+}
+
