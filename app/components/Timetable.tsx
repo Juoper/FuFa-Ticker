@@ -67,7 +67,6 @@ function getPositionPercent(time: string): number {
 export function Timetable({ entries }: TimetableProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mouseY, setMouseY] = useState<number>(0);
-  const [dragPreview, setDragPreview] = useState<{ day: string; time: string } | null>(null);
   const fetcher = useFetcher();
   const dayColumnRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -98,7 +97,6 @@ export function Timetable({ entries }: TimetableProps) {
 
   function handleDragStart(event: DragStartEvent) {
     setActiveId(event.active.id as string);
-    setDragPreview(null);
   }
 
   function handleDragEnd(event: DragEndEvent) {
@@ -133,50 +131,39 @@ export function Timetable({ entries }: TimetableProps) {
     const newMinutes = Math.round((percentage / 100) * totalMinutes);
     // Snap to 5-minute intervals
     const snappedMinutes = Math.round(newMinutes / 5) * 5;
-    const newTime = minutesToTime(snappedMinutes);
+    const newStartTime = minutesToTime(snappedMinutes);
+
+    // Calculate new end time by maintaining the duration
+    let newEndTime: string | null = null;
+    if (entry.endTime) {
+      const [oldStartHours, oldStartMins] = entry.startTime.split(':').map(Number);
+      const [oldEndHours, oldEndMins] = entry.endTime.split(':').map(Number);
+      const durationMinutes = (oldEndHours * 60 + oldEndMins) - (oldStartHours * 60 + oldStartMins);
+      const newEndMinutes = snappedMinutes + durationMinutes;
+      newEndTime = minutesToTime(newEndMinutes);
+    }
 
     // Only update if something changed
-    if (newDay !== entry.day || newTime !== entry.startTime) {
+    if (newDay !== entry.day || newStartTime !== entry.startTime) {
       fetcher.submit(
         {
           intent: 'update-timetable-position',
           entryId: entry.id,
           day: newDay,
-          startTime: newTime,
+          startTime: newStartTime,
+          endTime: newEndTime || '',
         },
         { method: 'post' }
       );
     }
 
     setActiveId(null);
-    setDragPreview(null);
   }
 
   function handleDragMove(event: any) {
     if (event.activatorEvent && 'clientY' in event.activatorEvent) {
       const currentY = event.activatorEvent.clientY + event.delta.y;
       setMouseY(currentY);
-
-      // Calculate preview position
-      if (event.over) {
-        const overId = event.over.id.toString();
-        const day = overId.replace('day-column-', '');
-        const dayColumn = dayColumnRefs.current[day];
-        
-        if (dayColumn) {
-          const rect = dayColumn.getBoundingClientRect();
-          const relativeY = currentY - rect.top;
-          const percentage = Math.max(0, Math.min(100, (relativeY / rect.height) * 100));
-          const totalMinutes = TOTAL_HOURS * 60;
-          const newMinutes = Math.round((percentage / 100) * totalMinutes);
-          const snappedMinutes = Math.round(newMinutes / 5) * 5;
-          const newTime = minutesToTime(snappedMinutes);
-          
-          setDragPreview({ day, time: newTime });
-        }
-      } else {
-        setDragPreview(null);
-      }
     }
   }
 
@@ -244,7 +231,6 @@ export function Timetable({ entries }: TimetableProps) {
               day={day}
               entries={entriesByDay[day.key] || []}
               setRef={(ref) => { dayColumnRefs.current[day.key] = ref; }}
-              dragPreview={dragPreview?.day === day.key ? dragPreview.time : null}
             />
           ))}
           </div>
@@ -265,12 +251,10 @@ function DayColumn({
   day,
   entries,
   setRef,
-  dragPreview,
 }: {
   day: { key: string; label: string };
   entries: TimetableEntry[];
   setRef: (ref: HTMLDivElement | null) => void;
-  dragPreview: string | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-column-${day.key}`,
@@ -303,19 +287,6 @@ function DayColumn({
           );
         })}
 
-        {/* Drag preview indicator */}
-        {dragPreview && (
-          <div
-            className="absolute left-1 right-1 pointer-events-none"
-            style={{
-              top: `${getPositionPercent(dragPreview)}%`,
-            }}
-          >
-            <div className="bg-transparent border-2 border-blue-500 border-dashed rounded px-3 py-2 text-base opacity-60 text-gray-800">
-              <div className="font-semibold">{dragPreview}</div>
-            </div>
-          </div>
-        )}
 
         {/* Events */}
         {entries.map((entry) => (
@@ -352,10 +323,35 @@ function DraggableEvent({ entry }: { entry: TimetableEntry }) {
       style={{
         top: `${topPercent}%`,
         height: heightPercent ? `${heightPercent}%` : 'auto',
-        opacity: isDragging ? 0.5 : 1,
+        opacity: isDragging ? 0 : 1,
       }}
     >
       <EventCard entry={entry} />
+    </div>
+  );
+}
+
+function DragOverlayContent({ entry }: { entry: TimetableEntry }) {
+  // Calculate height based on duration if endTime exists
+  let heightPixels: number | string = 'auto';
+  if (entry.endTime) {
+    const startMinutes = timeToMinutes(entry.startTime);
+    const endMinutes = timeToMinutes(entry.endTime);
+    const durationMinutes = endMinutes - startMinutes;
+    const totalMinutes = TOTAL_HOURS * 60;
+    const heightPercent = (durationMinutes / totalMinutes) * 100;
+    // Calculate pixel height based on the full timeline height (2400px)
+    heightPixels = (heightPercent / 100) * 2400;
+  }
+
+  return (
+    <div
+      style={{
+        height: heightPixels,
+        width: '300px',
+      }}
+    >
+      <EventCard entry={entry} isDragging />
     </div>
   );
 }
@@ -386,7 +382,7 @@ function EventCard({
       className={`
         bg-blue-200/70 border-2 border-blue-500 text-gray-800 rounded px-3 text-base cursor-move
         hover:border-blue-600 hover:bg-blue-300/70 transition shadow h-full flex items-start
-        ${isDragging ? 'opacity-80 rotate-2' : ''}
+        ${isDragging ? 'opacity-80' : ''}
         ${isSmallEntry ? 'py-0' : 'py-2'}
       `}
     >

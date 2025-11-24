@@ -174,6 +174,7 @@ export async function action({ request }: Route.ActionArgs) {
     const entryId = formData.get("entryId") as string;
     const day = formData.get("day") as string;
     const startTime = formData.get("startTime") as string;
+    const endTime = formData.get("endTime") as string;
 
     if (!entryId || !day || !startTime) {
       return { error: "Missing required fields" };
@@ -184,6 +185,7 @@ export async function action({ request }: Route.ActionArgs) {
       data: {
         day,
         startTime,
+        endTime: endTime || null,
       },
     });
 
