@@ -5,6 +5,7 @@ import { getUserFromRequest, createUser, createUserCookie } from "~/lib/session.
 import { prisma } from "~/lib/db.server";
 import { NamePrompt } from "~/components/NamePrompt";
 import { PostItem } from "~/components/PostItem";
+import { Timetable } from "~/components/Timetable";
 import { useWebSocket } from "~/hooks/useWebSocket";
 import { broadcastNewPost, broadcastDeletePost } from "~/lib/websocket.server";
 
@@ -12,50 +13,58 @@ export async function loader({ request }: Route.LoaderArgs) {
   const user = await getUserFromRequest(request);
 
   if (!user) {
-    return { user: null, posts: [] };
+    return { user: null, posts: [], timetableEntries: [] };
   }
 
-  const posts = await prisma.post.findMany({
-    where: {
-      parentId: null, // Only top-level posts
-    },
-    include: {
-      user: {
-        select: {
-          name: true,
-        },
+  const [posts, timetableEntries] = await Promise.all([
+    prisma.post.findMany({
+      where: {
+        parentId: null, // Only top-level posts
       },
-      replies: {
-        include: {
-          user: {
-            select: {
-              name: true,
-            },
+      include: {
+        user: {
+          select: {
+            name: true,
           },
-          replies: {
-            include: {
-              user: {
-                select: {
-                  name: true,
-                },
+        },
+        replies: {
+          include: {
+            user: {
+              select: {
+                name: true,
               },
             },
-            orderBy: {
-              createdAt: "asc",
+            replies: {
+              include: {
+                user: {
+                  select: {
+                    name: true,
+                  },
+                },
+              },
+              orderBy: {
+                createdAt: "asc",
+              },
             },
           },
-        },
-        orderBy: {
-          createdAt: "asc",
+          orderBy: {
+            createdAt: "asc",
+          },
         },
       },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+      orderBy: {
+        createdAt: "desc",
+      },
+    }),
+    prisma.timetableEntry.findMany({
+      orderBy: [
+        { day: "asc" },
+        { startTime: "asc" },
+      ],
+    }),
+  ]);
 
-  return { user, posts };
+  return { user, posts, timetableEntries };
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -160,11 +169,32 @@ export async function action({ request }: Route.ActionArgs) {
     return { success: true };
   }
 
+  // Handle timetable entry position update
+  if (intent === "update-timetable-position") {
+    const entryId = formData.get("entryId") as string;
+    const day = formData.get("day") as string;
+    const startTime = formData.get("startTime") as string;
+
+    if (!entryId || !day || !startTime) {
+      return { error: "Missing required fields" };
+    }
+
+    await prisma.timetableEntry.update({
+      where: { id: entryId },
+      data: {
+        day,
+        startTime,
+      },
+    });
+
+    return { success: true };
+  }
+
   return { error: "Invalid intent" };
 }
 
 export default function Home() {
-  const { user, posts } = useLoaderData<typeof loader>();
+  const { user, posts, timetableEntries } = useLoaderData<typeof loader>();
   const [postContent, setPostContent] = useState("");
   const revalidator = useRevalidator();
 
@@ -189,65 +219,70 @@ export default function Home() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-3xl">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold">Live Feed</h1>
-        <div className="flex items-center space-x-2">
-          <div
-            className={`w-2 h-2 rounded-full ${
-              isConnected ? "bg-green-500" : "bg-red-500"
-            }`}
-          />
-          <span className="text-sm text-gray-600">
-            {isConnected ? "Live" : "Disconnected"}
-          </span>
+    <div className="container mx-auto px-4 py-8 max-w-6xl">
+      {/* Timetable */}
+      <Timetable entries={timetableEntries} />
+
+      <div className="max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-3xl font-bold">Live Feed</h1>
+          <div className="flex items-center space-x-2">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+            />
+            <span className="text-sm text-gray-600">
+              {isConnected ? "Live" : "Disconnected"}
+            </span>
+          </div>
         </div>
-      </div>
 
-      {/* New Post Form */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <Form
-          method="post"
-          onSubmit={(e) => {
-            setTimeout(() => {
-              setPostContent("");
-              revalidator.revalidate();
-            }, 100);
-          }}
-        >
-          <input type="hidden" name="intent" value="post" />
-          <textarea
-            name="content"
-            value={postContent}
-            onChange={(e) => setPostContent(e.target.value)}
-            placeholder="What's on your mind?"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            rows={3}
-            required
-          />
-          <div className="flex justify-end mt-3">
-            <button
-              type="submit"
-              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300"
-              disabled={!postContent.trim()}
-            >
-              Post
-            </button>
-          </div>
-        </Form>
-      </div>
+        {/* New Post Form */}
+        <div className="bg-white rounded-lg shadow p-4 mb-6">
+          <Form
+            method="post"
+            onSubmit={(e) => {
+              setTimeout(() => {
+                setPostContent("");
+                revalidator.revalidate();
+              }, 100);
+            }}
+          >
+            <input type="hidden" name="intent" value="post" />
+            <textarea
+              name="content"
+              value={postContent}
+              onChange={(e) => setPostContent(e.target.value)}
+              placeholder="What's on your mind?"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              rows={3}
+              required
+            />
+            <div className="flex justify-end mt-3">
+              <button
+                type="submit"
+                className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:bg-gray-300"
+                disabled={!postContent.trim()}
+              >
+                Post
+              </button>
+            </div>
+          </Form>
+        </div>
 
-      {/* Posts List */}
-      <div>
-        {posts.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <p>No posts yet. Be the first to post!</p>
-          </div>
-        ) : (
-          posts.map((post) => (
-            <PostItem key={post.id} post={post} isAdmin={user.isAdmin} />
-          ))
-        )}
+        {/* Posts List */}
+        <div>
+          {posts.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <p>No posts yet. Be the first to post!</p>
+            </div>
+          ) : (
+            posts.map((post) => (
+              <PostItem key={post.id} post={post} isAdmin={user.isAdmin} />
+            ))
+          )}
+        </div>
       </div>
     </div>
   );

@@ -66,3 +66,14 @@ model MemeVote {
   @@index([userId])
 }
 
+model TimetableEntry {
+  id        String   @id @default(cuid())
+  startTime String   // Time in format "HH:mm" (e.g., "8:00", "14:30")
+  endTime   String?  // Optional end time for duration display
+  day       String   // "friday", "saturday", "sunday"
+  content   String   // Activity description
+  createdAt DateTime @default(now())
+  
+  @@index([day, startTime])
+}
+
