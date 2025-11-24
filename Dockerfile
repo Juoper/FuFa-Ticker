@@ -1,19 +1,27 @@
 FROM node:20-alpine AS development-dependencies-env
-COPY . /app
 WORKDIR /app
-RUN npm ci
+COPY package.json package-lock.json /app/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+COPY . /app
 
 FROM node:20-alpine AS production-dependencies-env
-COPY ./package.json package-lock.json /app/
 WORKDIR /app
-RUN npm ci --omit=dev
+COPY package.json package-lock.json /app/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev
 
 FROM node:20-alpine AS build-env
-COPY . /app/
-COPY --from=development-dependencies-env /app/node_modules /app/node_modules
 WORKDIR /app
-# Generate Prisma Client
+# Copy package files and dependencies first
+COPY package.json package-lock.json /app/
+COPY --from=development-dependencies-env /app/node_modules /app/node_modules
+# Copy prisma schema for client generation
+COPY prisma /app/prisma
+# Generate Prisma Client (do this before copying source code for better caching)
 RUN npx prisma generate
+# Now copy the rest of the source code
+COPY . /app/
 # Build the application
 RUN npm run build
 
@@ -45,5 +53,5 @@ ENV DATABASE_URL="file:./prisma/dev.db"
 # Expose port
 EXPOSE 3000
 
-# Run migrations and start the server
-CMD sh -c "npx prisma migrate deploy --schema=/app/prisma/schema.prisma && npm run start"
+# Run migrations, seed, and start the server
+CMD sh -c "npx prisma migrate deploy --schema=/app/prisma/schema.prisma && npm run seed && npm run start"
