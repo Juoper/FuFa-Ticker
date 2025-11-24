@@ -5,6 +5,7 @@ import { requireUser } from "~/lib/session.server";
 import { useWebSocket, type WebSocketMessage } from "~/hooks/useWebSocket";
 import { OnlinePlayers } from "~/components/OnlinePlayers";
 import { TicTacToeGame } from "~/components/TicTacToeGame";
+import { HangmanGame } from "~/components/HangmanGame";
 import { GameStats } from "~/components/GameStats";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -21,7 +22,8 @@ interface Challenge {
   id: string;
   fromUserId: string;
   fromUserName: string;
-  toUserId: string;
+  toUserId: string | string[];
+  toUserIds?: string[];
   gameType: string;
 }
 
@@ -64,7 +66,8 @@ export default function Games() {
             id: message.data.challengeId,
             fromUserId: user.id,
             fromUserName: user.name,
-            toUserId: message.data.toUserId,
+            toUserId: message.data.toUserIds || message.data.toUserId,
+            toUserIds: message.data.toUserIds,
             gameType: message.data.gameType,
           },
         ]);
@@ -77,7 +80,8 @@ export default function Games() {
             id: message.data.challengeId,
             fromUserId: message.data.fromUserId,
             fromUserName: message.data.fromUserName,
-            toUserId: user.id,
+            toUserId: message.data.toUserIds || user.id,
+            toUserIds: message.data.toUserIds,
             gameType: message.data.gameType,
           },
         ]);
@@ -202,11 +206,11 @@ export default function Games() {
     user.name
   );
 
-  const handleSendChallenge = (toUserId: string, gameType: string) => {
+  const handleSendChallenge = (toUserIds: string | string[], gameType: string) => {
     sendMessage("send_challenge", {
       fromUserId: user.id,
       fromUserName: user.name,
-      toUserId,
+      toUserIds,
       gameType,
     });
   };
@@ -234,6 +238,26 @@ export default function Games() {
         gameId: currentGame.gameId,
         userId: user.id,
         move: { position },
+      });
+    }
+  };
+
+  const handleSetWord = (word: string) => {
+    if (currentGame) {
+      sendMessage("set_word", {
+        gameId: currentGame.gameId,
+        userId: user.id,
+        word,
+      });
+    }
+  };
+
+  const handleGuessLetter = (letter: string) => {
+    if (currentGame) {
+      sendMessage("guess_letter", {
+        gameId: currentGame.gameId,
+        userId: user.id,
+        letter,
       });
     }
   };
@@ -313,9 +337,21 @@ export default function Games() {
                   disconnectedPlayers={currentGame.disconnectedPlayers}
                 />
               )}
+              {currentGame.gameType === "hangman" && (
+                <HangmanGame
+                  gameId={currentGame.gameId}
+                  players={currentGame.players}
+                  gameState={currentGame.state}
+                  currentUserId={user.id}
+                  onSetWord={handleSetWord}
+                  onGuessLetter={handleGuessLetter}
+                  onForfeit={handleForfeit}
+                  disconnectedPlayers={currentGame.disconnectedPlayers}
+                />
+              )}
             </div>
             <div className="space-y-6">
-              <GameStats userId={user.id} gameType="tictactoe" />
+              <GameStats userId={user.id} gameType={currentGame.gameType} />
             </div>
           </div>
         ) : (
@@ -336,6 +372,7 @@ export default function Games() {
             </div>
             <div className="space-y-6">
               <GameStats userId={user.id} gameType="tictactoe" />
+              <GameStats userId={user.id} gameType="hangman" />
             </div>
           </div>
         )}

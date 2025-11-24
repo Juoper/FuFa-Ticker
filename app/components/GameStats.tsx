@@ -37,10 +37,13 @@ export function GameStats({ userId, gameType }: GameStatsProps) {
     fetchStats();
   }, [userId, gameType]);
 
+  // Capitalize game type for display
+  const gameTypeDisplay = gameType.charAt(0).toUpperCase() + gameType.slice(1).replace(/([A-Z])/g, ' $1').trim();
+  
   if (loading) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-2xl font-bold mb-4 text-gray-800">Your Stats</h2>
+        <h2 className="text-2xl font-bold mb-4 text-gray-800">{gameTypeDisplay} Stats</h2>
         <p className="text-gray-500">Loading...</p>
       </div>
     );
@@ -49,7 +52,7 @@ export function GameStats({ userId, gameType }: GameStatsProps) {
   if (!stats) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-2xl font-bold mb-4 text-gray-800">Your Stats</h2>
+        <h2 className="text-2xl font-bold mb-4 text-gray-800">{gameTypeDisplay} Stats</h2>
         <p className="text-gray-500">No stats available</p>
       </div>
     );
@@ -65,7 +68,7 @@ export function GameStats({ userId, gameType }: GameStatsProps) {
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-2xl font-bold mb-4 text-gray-800">
-        Your Stats
+        {gameTypeDisplay} Stats
       </h2>
 
       {stats.totalGames === 0 ? (

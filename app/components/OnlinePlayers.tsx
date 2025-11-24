@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 interface User {
   id: string;
   name: string;
@@ -7,7 +9,8 @@ interface Challenge {
   id: string;
   fromUserId: string;
   fromUserName: string;
-  toUserId: string;
+  toUserId: string | string[]; // Can be single user or array for multiplayer
+  toUserIds?: string[]; // For multiplayer challenges
   gameType: string;
 }
 
@@ -17,7 +20,7 @@ interface OnlinePlayersProps {
   currentUserName: string;
   incomingChallenges: Challenge[];
   outgoingChallenges: Challenge[];
-  onSendChallenge: (toUserId: string, gameType: string) => void;
+  onSendChallenge: (toUserIds: string | string[], gameType: string) => void;
   onAcceptChallenge: (challengeId: string) => void;
   onDeclineChallenge: (challengeId: string) => void;
   isInGame: boolean;
@@ -34,12 +37,105 @@ export function OnlinePlayers({
   onDeclineChallenge,
   isInGame,
 }: OnlinePlayersProps) {
+  const [selectedGameType, setSelectedGameType] = useState<'tictactoe' | 'hangman'>('tictactoe');
+  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
+  const [isSelectingPlayers, setIsSelectingPlayers] = useState(false);
+  
   // Filter out current user
   const otherUsers = users.filter((user) => user.id !== currentUserId);
+
+  const handleGameTypeChange = (gameType: 'tictactoe' | 'hangman') => {
+    setSelectedGameType(gameType);
+    setSelectedPlayers([]);
+    setIsSelectingPlayers(false);
+  };
+
+  const togglePlayerSelection = (userId: string) => {
+    setSelectedPlayers(prev => 
+      prev.includes(userId) 
+        ? prev.filter(id => id !== userId)
+        : [...prev, userId]
+    );
+  };
+
+  const handleSendMultiplayerChallenge = () => {
+    if (selectedPlayers.length > 0) {
+      onSendChallenge(selectedPlayers, selectedGameType);
+      setSelectedPlayers([]);
+      setIsSelectingPlayers(false);
+    }
+  };
+
+  const handleQuickChallenge = (userId: string) => {
+    if (selectedGameType === 'hangman') {
+      // For hangman, go into selection mode
+      setIsSelectingPlayers(true);
+      setSelectedPlayers([userId]);
+    } else {
+      // For tictactoe, send immediately (1v1)
+      onSendChallenge(userId, selectedGameType);
+    }
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
       <h2 className="text-2xl font-bold mb-4 text-gray-800">Online Players</h2>
+
+      {/* Game Type Selector */}
+      {!isInGame && (
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+          <p className="text-sm text-gray-600 mb-2">Select Game Type:</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleGameTypeChange('tictactoe')}
+              className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
+                selectedGameType === 'tictactoe'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+              }`}
+            >
+              Tic-Tac-Toe (1v1)
+            </button>
+            <button
+              onClick={() => handleGameTypeChange('hangman')}
+              className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
+                selectedGameType === 'hangman'
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+              }`}
+            >
+              Hangman (2-8 players)
+            </button>
+          </div>
+          
+          {/* Multiplayer Selection Mode */}
+          {isSelectingPlayers && selectedGameType === 'hangman' && (
+            <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-purple-800">
+                  Select 1-7 players for Hangman ({selectedPlayers.length} selected)
+                </p>
+                <button
+                  onClick={() => {
+                    setIsSelectingPlayers(false);
+                    setSelectedPlayers([]);
+                  }}
+                  className="text-xs text-purple-600 hover:text-purple-800"
+                >
+                  Cancel
+                </button>
+              </div>
+              <button
+                onClick={handleSendMultiplayerChallenge}
+                disabled={selectedPlayers.length === 0 || selectedPlayers.length > 7}
+                className="w-full px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                Send Challenge to {selectedPlayers.length} Player{selectedPlayers.length !== 1 ? 's' : ''}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Incoming Challenges */}
       {incomingChallenges.length > 0 && (
@@ -47,35 +143,47 @@ export function OnlinePlayers({
           <h3 className="font-semibold text-yellow-800 mb-2">
             Incoming Challenges
           </h3>
-          {incomingChallenges.map((challenge) => (
-            <div
-              key={challenge.id}
-              className="flex items-center justify-between bg-white p-3 rounded mb-2"
-            >
-              <div>
-                <p className="font-medium text-gray-800">
-                  {challenge.fromUserName}
-                </p>
-                <p className="text-sm text-gray-600">
-                  wants to play {challenge.gameType}
-                </p>
+          {incomingChallenges.map((challenge) => {
+            const isMultiplayer = Array.isArray(challenge.toUserIds) && challenge.toUserIds.length > 1;
+            const otherPlayers = isMultiplayer 
+              ? users.filter(u => challenge.toUserIds?.includes(u.id) && u.id !== currentUserId)
+              : [];
+            
+            return (
+              <div
+                key={challenge.id}
+                className="flex items-center justify-between bg-white p-3 rounded mb-2"
+              >
+                <div>
+                  <p className="font-medium text-gray-800">
+                    {challenge.fromUserName}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    wants to play {challenge.gameType}
+                    {isMultiplayer && otherPlayers.length > 0 && (
+                      <span className="text-xs ml-1">
+                        (with {otherPlayers.map(u => u.name).join(', ')})
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onAcceptChallenge(challenge.id)}
+                    className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => onDeclineChallenge(challenge.id)}
+                    className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition"
+                  >
+                    Decline
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onAcceptChallenge(challenge.id)}
-                  className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 transition"
-                >
-                  Accept
-                </button>
-                <button
-                  onClick={() => onDeclineChallenge(challenge.id)}
-                  className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 transition"
-                >
-                  Decline
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -86,7 +194,11 @@ export function OnlinePlayers({
             Pending Challenges
           </h3>
           {outgoingChallenges.map((challenge) => {
-            const targetUser = users.find((u) => u.id === challenge.toUserId);
+            const isMultiplayer = Array.isArray(challenge.toUserIds) && challenge.toUserIds.length > 1;
+            const targetUsers = isMultiplayer
+              ? users.filter(u => challenge.toUserIds?.includes(u.id))
+              : [users.find((u) => u.id === challenge.toUserId)].filter(Boolean);
+            
             return (
               <div
                 key={challenge.id}
@@ -94,7 +206,7 @@ export function OnlinePlayers({
               >
                 <div>
                   <p className="font-medium text-gray-800">
-                    Challenged {targetUser?.name || "Unknown"}
+                    Challenged {targetUsers.map(u => u?.name).join(', ') || "Unknown"}
                   </p>
                   <p className="text-sm text-gray-600">
                     {challenge.gameType} - Waiting for response...
@@ -113,27 +225,52 @@ export function OnlinePlayers({
         ) : (
           otherUsers.map((user) => {
             const hasPendingChallenge = outgoingChallenges.some(
-              (c) => c.toUserId === user.id
+              (c) => c.toUserId === user.id || c.toUserIds?.includes(user.id)
             );
             const hasIncomingChallenge = incomingChallenges.some(
               (c) => c.fromUserId === user.id
             );
+            const isSelected = selectedPlayers.includes(user.id);
 
             return (
               <div
                 key={user.id}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition"
+                className={`flex items-center justify-between p-3 rounded-lg transition ${
+                  isSelectingPlayers && selectedGameType === 'hangman'
+                    ? isSelected
+                      ? 'bg-purple-100 border-2 border-purple-500'
+                      : 'bg-gray-50 hover:bg-gray-100 cursor-pointer'
+                    : 'bg-gray-50 hover:bg-gray-100'
+                }`}
+                onClick={() => {
+                  if (isSelectingPlayers && selectedGameType === 'hangman' && !hasPendingChallenge && !hasIncomingChallenge) {
+                    togglePlayerSelection(user.id);
+                  }
+                }}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  {isSelectingPlayers && selectedGameType === 'hangman' && !hasPendingChallenge && !hasIncomingChallenge ? (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => togglePlayerSelection(user.id)}
+                      className="w-4 h-4 text-purple-600 cursor-pointer"
+                    />
+                  ) : (
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  )}
                   <span className="font-medium text-gray-800">{user.name}</span>
                 </div>
                 
-                {!isInGame && !hasPendingChallenge && !hasIncomingChallenge && (
+                {!isInGame && !hasPendingChallenge && !hasIncomingChallenge && !isSelectingPlayers && (
                   <div className="flex gap-2">
                     <button
-                      onClick={() => onSendChallenge(user.id, "tictactoe")}
-                      className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition text-sm font-medium"
+                      onClick={() => handleQuickChallenge(user.id)}
+                      className={`px-4 py-2 rounded hover:opacity-90 transition text-sm font-medium ${
+                        selectedGameType === 'tictactoe'
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-purple-500 text-white'
+                      }`}
                     >
                       Challenge
                     </button>
