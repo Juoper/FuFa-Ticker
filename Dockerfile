@@ -39,6 +39,9 @@ WORKDIR /app
 # Create upload directories
 RUN mkdir -p /app/public/uploads/memes
 
+# Set default database URL if not provided
+ENV DATABASE_URL="file:./prisma/dev.db"
+
 # Expose port
 EXPOSE 3000
 
