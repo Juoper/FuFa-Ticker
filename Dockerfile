@@ -28,8 +28,9 @@ COPY --from=build-env /app/build /app/build
 COPY --from=build-env /app/prisma /app/prisma
 COPY --from=build-env /app/node_modules/.prisma /app/node_modules/.prisma
 COPY --from=build-env /app/node_modules/@prisma /app/node_modules/@prisma
-# Copy server file
+# Copy server file and app directory (needed for imports)
 COPY --from=build-env /app/server.ts /app/server.ts
+COPY --from=build-env /app/app /app/app
 # Copy public directory for uploads
 COPY --from=build-env /app/public /app/public
 
