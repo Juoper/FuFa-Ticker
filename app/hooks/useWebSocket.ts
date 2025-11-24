@@ -1,14 +1,43 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
-interface WebSocketMessage {
-  type: "new_post" | "delete_post";
+export interface WebSocketMessage {
+  type: 
+    | "new_post" 
+    | "delete_post"
+    | "online_users"
+    | "challenge_sent"
+    | "challenge_received"
+    | "challenge_declined"
+    | "challenge_expired"
+    | "challenge_cancelled"
+    | "challenge_error"
+    | "game_start"
+    | "game_update"
+    | "game_over"
+    | "game_state"
+    | "game_error"
+    | "player_reconnected"
+    | "player_disconnected";
   data: any;
 }
 
-export function useWebSocket(onMessage: (message: WebSocketMessage) => void) {
+export function useWebSocket(
+  onMessage: (message: WebSocketMessage) => void,
+  userId?: string,
+  userName?: string
+) {
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const registeredRef = useRef(false);
+
+  const sendMessage = useCallback((type: string, data: any) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type, data }));
+    } else {
+      console.warn("WebSocket is not connected. Cannot send message.");
+    }
+  }, []);
 
   useEffect(() => {
     function connect() {
@@ -22,6 +51,17 @@ export function useWebSocket(onMessage: (message: WebSocketMessage) => void) {
         ws.onopen = () => {
           console.log("WebSocket connected");
           setIsConnected(true);
+          registeredRef.current = false;
+          
+          // Register user if userId and userName are provided
+          if (userId && userName) {
+            ws.send(JSON.stringify({
+              type: "register",
+              data: { userId, userName },
+            }));
+            registeredRef.current = true;
+          }
+
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
@@ -45,6 +85,7 @@ export function useWebSocket(onMessage: (message: WebSocketMessage) => void) {
           console.log("WebSocket disconnected");
           setIsConnected(false);
           wsRef.current = null;
+          registeredRef.current = false;
 
           // Attempt to reconnect after 3 seconds
           reconnectTimeoutRef.current = setTimeout(() => {
@@ -71,8 +112,8 @@ export function useWebSocket(onMessage: (message: WebSocketMessage) => void) {
         wsRef.current.close();
       }
     };
-  }, [onMessage]);
+  }, [onMessage, userId, userName]);
 
-  return { isConnected };
+  return { isConnected, sendMessage };
 }
 

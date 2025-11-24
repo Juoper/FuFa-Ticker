@@ -34,8 +34,9 @@ const DAYS = [
 const START_HOUR = 2;
 const END_HOUR = 23;
 const TOTAL_HOURS = END_HOUR - START_HOUR;
-// Default visible hours (2:00 to 20:00)
-const DEFAULT_VISIBLE_END_HOUR = 20;
+// Default visible hours (8:00 to 12:00)
+const DEFAULT_VISIBLE_START_HOUR = 8;
+const DEFAULT_VISIBLE_END_HOUR = 12;
 
 // Convert time string "HH:mm" to minutes from start
 function timeToMinutes(time: string): number {
@@ -79,11 +80,15 @@ export function Timetable({ entries }: TimetableProps) {
     })
   );
 
-  // Set initial scroll position to show 2:00 to 20:00 by default
+  // Set initial scroll position to show 8:00 to 12:00 by default
   useEffect(() => {
     if (scrollContainerRef.current) {
-      // Start at the top (2:00), the maxHeight will control how much is visible
-      scrollContainerRef.current.scrollTop = 0;
+      // Calculate scroll position to start at 8:00
+      // Hours from start (2:00) to default start (8:00) = 6 hours
+      const hoursFromStart = DEFAULT_VISIBLE_START_HOUR - START_HOUR;
+      const scrollPercentage = hoursFromStart / TOTAL_HOURS;
+      const totalHeight = scrollContainerRef.current.scrollHeight;
+      scrollContainerRef.current.scrollTop = totalHeight * scrollPercentage;
     }
   }, []);
 
@@ -183,7 +188,7 @@ export function Timetable({ entries }: TimetableProps) {
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6 mb-6 max-w-7xl mx-auto">
-      <h2 className="text-2xl font-bold mb-4">Wochenend-Zeitplan</h2>
+      <h2 className="text-3xl font-bold mb-6">Wochenend-Zeitplan</h2>
 
       <DndContext
         sensors={sensors}
@@ -196,29 +201,29 @@ export function Timetable({ entries }: TimetableProps) {
             ref={scrollContainerRef}
             className="overflow-y-auto"
             style={{ 
-              maxHeight: '1030px', // Shows ~18 hours (2:00 to 20:00)
+              maxHeight: '560px', // Shows ~4 hours (8:00 to 12:00) with doubled height
             }}
           >
           <div
             className="grid gap-4 relative"
             style={{ 
-              minHeight: '1200px', // Total height for 21 hours (2:00 to 23:00)
+              minHeight: '2400px', // Total height for 21 hours (2:00 to 23:00) - doubled for more zoom
               gridTemplateColumns: 'auto 1fr 1fr 1fr'
             }}
           >
           {/* Time scale column */}
           <div className="relative">
-            <div className="h-10 flex items-center justify-center font-bold border-b">
+            <div className="h-12 flex items-center justify-center font-bold text-lg border-b">
               Zeit
             </div>
-            <div className="relative" style={{ height: 'calc(100% - 40px)' }}>
+            <div className="relative" style={{ height: 'calc(100% - 48px)' }}>
               {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
                 const hour = (START_HOUR + i) % 24;
                 const percent = (i / TOTAL_HOURS) * 100;
                 return (
                   <div
                     key={i}
-                    className="absolute left-0 right-0 text-sm text-gray-600 flex items-center"
+                    className="absolute left-0 right-0 text-base font-medium text-gray-600 flex items-center"
                     style={{ 
                       top: `${percent}%`,
                       transform: 'translateY(-50%)'
@@ -249,7 +254,7 @@ export function Timetable({ entries }: TimetableProps) {
         </div>
 
         <DragOverlay>
-          {activeEntry ? <EventCard entry={activeEntry} isDragging /> : null}
+          {activeEntry ? <DragOverlayContent entry={activeEntry} /> : null}
         </DragOverlay>
       </DndContext>
     </div>
@@ -273,7 +278,7 @@ function DayColumn({
 
   return (
     <div className="relative">
-      <div className="h-10 flex items-center justify-center font-bold border-b bg-blue-50">
+      <div className="h-12 flex items-center justify-center font-bold text-lg border-b bg-blue-50">
         {day.label}
       </div>
       <div
@@ -284,7 +289,7 @@ function DayColumn({
         className={`relative border border-gray-200 rounded transition ${
           isOver ? 'bg-blue-50 border-blue-400' : ''
         }`}
-        style={{ height: 'calc(100% - 40px)' }}
+        style={{ height: 'calc(100% - 48px)' }}
       >
         {/* Grid lines for visual guidance */}
         {Array.from({ length: TOTAL_HOURS }, (_, i) => {
@@ -306,7 +311,7 @@ function DayColumn({
               top: `${getPositionPercent(dragPreview)}%`,
             }}
           >
-            <div className="bg-blue-300 border-2 border-blue-500 border-dashed rounded px-2 py-1 text-sm opacity-60">
+            <div className="bg-transparent border-2 border-blue-500 border-dashed rounded px-3 py-2 text-base opacity-60 text-gray-800">
               <div className="font-semibold">{dragPreview}</div>
             </div>
           </div>
@@ -366,16 +371,27 @@ function EventCard({
     ? `${entry.startTime} - ${entry.endTime}` 
     : entry.startTime;
   
+  // Calculate duration in minutes
+  let durationMinutes = 60; // default
+  if (entry.endTime) {
+    const [startHours, startMins] = entry.startTime.split(':').map(Number);
+    const [endHours, endMins] = entry.endTime.split(':').map(Number);
+    durationMinutes = (endHours * 60 + endMins) - (startHours * 60 + startMins);
+  }
+  
+  const isSmallEntry = durationMinutes <= 15;
+  
   return (
     <div
       className={`
-        bg-blue-500 text-white rounded px-2 py-1 text-sm cursor-move
-        hover:bg-blue-600 transition shadow h-full flex flex-col
+        bg-blue-200/70 border-2 border-blue-500 text-gray-800 rounded px-3 text-base cursor-move
+        hover:border-blue-600 hover:bg-blue-300/70 transition shadow h-full flex items-start
         ${isDragging ? 'opacity-80 rotate-2' : ''}
+        ${isSmallEntry ? 'py-0' : 'py-2'}
       `}
     >
-      <div className="font-semibold text-xs">{timeRange}</div>
-      <div className="text-xs flex-1 overflow-hidden">{entry.content}</div>
+      <div className="font-semibold text-sm whitespace-nowrap mr-2">{timeRange}</div>
+      <div className="text-sm flex-1 overflow-hidden">{entry.content}</div>
     </div>
   );
 }
