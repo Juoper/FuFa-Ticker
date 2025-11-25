@@ -45,7 +45,7 @@ COPY --from=build-env /app/app ./app
 COPY --from=build-env /app/public ./public
 
 # Create upload directories
-RUN mkdir -p /app/public/uploads/memes
+RUN mkdir -p public/uploads/memes
 
 # Set default database URL if not provided
 ENV DATABASE_URL="file:./prisma/dev.db"
