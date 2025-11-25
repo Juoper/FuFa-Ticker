@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { prisma as db } from "./db.server";
 import * as TicTacToe from "./tictactoe.server";
 import * as Hangman from "./hangman.server";
+import * as Millionaire from "./millionaire.server";
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
@@ -100,6 +101,15 @@ async function handleWebSocketMessage(ws: WebSocket, message: any) {
       break;
     case "forfeit_game":
       await handleForfeitGame(data);
+      break;
+    case "millionaire_answer":
+      await handleMillionaireAnswer(data);
+      break;
+    case "use_lifeline":
+      await handleUseLifeline(data);
+      break;
+    case "millionaire_walk_away":
+      await handleMillionaireWalkAway(data);
       break;
     default:
       console.log("Unknown message type:", type);
@@ -253,6 +263,14 @@ async function handleSendChallenge(data: { fromUserId: string; fromUserName: str
     return;
   }
 
+  if (gameType === 'millionaire' && (toUserIds.length < 1 || toUserIds.length > 10)) {
+    sendToUser(fromUserId, {
+      type: "challenge_error",
+      data: { message: "Millionaire requires 1-10 players" },
+    });
+    return;
+  }
+
   // Create challenge
   const challengeId = `challenge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const timeout = setTimeout(() => {
@@ -356,6 +374,9 @@ async function handleChallengeResponse(data: { challengeId: string; accepted: bo
     } else if (challenge.gameType === 'hangman') {
       // Multiplayer game
       await createHangmanGame(challenge.fromUserId, challenge.toUserIds);
+    } else if (challenge.gameType === 'millionaire') {
+      // Multiplayer game
+      await createMillionaireGame(challenge.fromUserId, challenge.toUserIds);
     }
   } else {
     // Notify challenger that this user accepted
@@ -944,6 +965,41 @@ async function handleForfeitGame(data: { gameId: string; userId: string }) {
         });
       }
     }
+  } else if (game.gameType === 'millionaire') {
+    // Millionaire game - player forfeits, treated as elimination
+    const state = game.state as Millionaire.MillionaireState;
+    const { newState, prizeWon } = Millionaire.walkAway(state, userId);
+    game.state = newState;
+
+    await db.game.update({
+      where: { gameId },
+      data: {
+        gameState: JSON.stringify(newState),
+      },
+    });
+
+    sendToGamePlayers(gameId, {
+      type: "game_update",
+      data: {
+        gameId,
+        state: newState,
+        currentTurn: null,
+      },
+    });
+
+    // If all players eliminated, end game
+    if (newState.status === 'completed') {
+      sendToGamePlayers(gameId, {
+        type: "game_over",
+        data: {
+          gameId,
+          state: newState,
+          reason: "forfeit",
+        },
+      });
+      activeGames.delete(gameId);
+      return;
+    }
   }
 
   activeGames.delete(gameId);
@@ -1019,9 +1075,393 @@ async function handlePlayerAbandon(gameId: string, userId: string) {
         });
       }
     }
+  } else if (game.gameType === 'millionaire') {
+    // Millionaire game - player abandoned, treated as elimination
+    const state = game.state as Millionaire.MillionaireState;
+    const { newState, prizeWon } = Millionaire.walkAway(state, userId);
+    game.state = newState;
+
+    await db.game.update({
+      where: { gameId },
+      data: {
+        gameState: JSON.stringify(newState),
+        status: 'abandoned',
+      },
+    });
+
+    // Update stats for forfeiting player
+    await Millionaire.updateGameStats(userId, 'millionaire', 'loss');
+
+    sendToGamePlayers(gameId, {
+      type: "game_update",
+      data: {
+        gameId,
+        state: newState,
+        currentTurn: null,
+      },
+    });
+
+    // If all players eliminated, end game
+    if (newState.status === 'completed') {
+      sendToGamePlayers(gameId, {
+        type: "game_over",
+        data: {
+          gameId,
+          state: newState,
+          reason: "abandoned",
+        },
+      });
+      activeGames.delete(gameId);
+      return;
+    }
   }
 
   activeGames.delete(gameId);
+}
+
+async function createMillionaireGame(hostId: string, playerIds: string[]) {
+  try {
+    // Fetch user names
+    const allUserIds = [hostId, ...playerIds];
+    const users = await db.user.findMany({
+      where: { id: { in: allUserIds } },
+      select: { id: true, name: true },
+    });
+
+    // Initialize game state
+    const initialState = Millionaire.initializeMillionaireGame(allUserIds);
+
+    // Create game in database
+    const game = await db.game.create({
+      data: {
+        gameType: 'millionaire',
+        gameState: JSON.stringify(initialState),
+        currentTurn: null, // No turns in millionaire
+        status: 'active',
+      },
+    });
+
+    // Create player records
+    const playerData = allUserIds.map(id => ({
+      gameId: game.id,
+      userId: id,
+      playerRole: 'contestant',
+    }));
+    
+    await db.gamePlayer.createMany({ data: playerData });
+
+    // Build players list
+    const players = allUserIds.map(id => {
+      const user = users.find(u => u.id === id);
+      return { userId: id, userName: user?.name || 'Unknown', role: 'contestant' };
+    });
+
+    // Store in active games
+    activeGames.set(game.id, {
+      id: game.id,
+      gameType: 'millionaire',
+      players,
+      state: initialState,
+      disconnectedPlayers: new Set(),
+      disconnectTimers: new Map(),
+    });
+
+    // Notify all players
+    const gameStartData = {
+      gameId: game.id,
+      gameType: 'millionaire',
+      players,
+      state: initialState,
+      currentTurn: null,
+    };
+
+    players.forEach(player => {
+      sendToUser(player.userId, {
+        type: "game_start",
+        data: gameStartData,
+      });
+    });
+  } catch (error) {
+    console.error("Error creating millionaire game:", error);
+  }
+}
+
+async function handleMillionaireAnswer(data: { gameId: string; userId: string; answer: string }) {
+  const { gameId, userId, answer } = data;
+  
+  const game = activeGames.get(gameId);
+  if (!game || game.gameType !== 'millionaire') {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "Game not found" },
+    });
+    return;
+  }
+
+  const state = game.state as Millionaire.MillionaireState;
+
+  // Check if player is already eliminated
+  if (state.playerAnswers[userId]?.isEliminated) {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "You are already eliminated" },
+    });
+    return;
+  }
+
+  // Check if player already answered this question
+  if (state.playerAnswers[userId]?.answer !== null) {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "You already answered this question" },
+    });
+    return;
+  }
+
+  // Process answer
+  const { isCorrect, newState, prizeWon } = Millionaire.processAnswer(state, userId, answer);
+  game.state = newState;
+
+  // Update database
+  await db.game.update({
+    where: { id: gameId },
+    data: {
+      gameState: JSON.stringify(newState),
+      moveCount: { increment: 1 },
+    },
+  });
+
+  // Send answer result to the player
+  sendToUser(userId, {
+    type: "millionaire_answer_result",
+    data: {
+      gameId,
+      isCorrect,
+      correctAnswer: state.currentQuestion?.correctAnswer,
+      prizeWon,
+      newLevel: newState.playerAnswers[userId].currentLevel,
+      isEliminated: newState.playerAnswers[userId].isEliminated,
+    },
+  });
+
+  // Broadcast game update to all players
+  sendToGamePlayers(gameId, {
+    type: "game_update",
+    data: {
+      gameId,
+      state: newState,
+      currentTurn: null,
+    },
+  });
+
+  // Handle game end
+  if (newState.status === 'completed') {
+    const dbGame = await db.game.findUnique({
+      where: { id: gameId },
+      include: { players: true },
+    });
+
+    if (dbGame) {
+      // Update game status
+      await db.game.update({
+        where: { id: gameId },
+        data: {
+          status: 'completed',
+          completedAt: new Date(),
+        },
+      });
+
+      // Determine winners and update stats
+      const winners: string[] = [];
+      const losers: string[] = [];
+      
+      for (const [playerId, playerData] of Object.entries(newState.playerAnswers)) {
+        if (playerId === newState.winnerId || playerData.currentLevel === Millionaire.PRIZE_LADDER.length) {
+          winners.push(playerId);
+        } else {
+          losers.push(playerId);
+        }
+      }
+
+      // Update placements and stats
+      for (const winnerId of winners) {
+        await db.gamePlayer.updateMany({
+          where: { gameId, userId: winnerId },
+          data: { placement: 1 },
+        });
+        await Millionaire.updateGameStats?.(winnerId, 'millionaire', 'win');
+      }
+
+      for (const loserId of losers) {
+        await db.gamePlayer.updateMany({
+          where: { gameId, userId: loserId },
+          data: { placement: 2 },
+        });
+        await Millionaire.updateGameStats?.(loserId, 'millionaire', 'loss');
+      }
+    }
+
+    // Broadcast game over
+    sendToGamePlayers(gameId, {
+      type: "game_over",
+      data: {
+        gameId,
+        state: newState,
+        winnerId: newState.winnerId,
+      },
+    });
+
+    // Cleanup
+    activeGames.delete(gameId);
+  }
+}
+
+async function handleUseLifeline(data: { gameId: string; userId: string; lifeline: Millionaire.Lifeline }) {
+  const { gameId, userId, lifeline } = data;
+  
+  const game = activeGames.get(gameId);
+  if (!game || game.gameType !== 'millionaire') {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "Game not found" },
+    });
+    return;
+  }
+
+  const state = game.state as Millionaire.MillionaireState;
+
+  // Check if player is eliminated
+  if (state.playerAnswers[userId]?.isEliminated) {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "You are already eliminated" },
+    });
+    return;
+  }
+
+  // Check if lifeline already used
+  if (state.usedLifelines.includes(lifeline)) {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "Lifeline already used" },
+    });
+    return;
+  }
+
+  // Use lifeline
+  const newState = Millionaire.useLifeline(state, lifeline);
+  game.state = newState;
+
+  // Update database
+  await db.game.update({
+    where: { id: gameId },
+    data: {
+      gameState: JSON.stringify(newState),
+    },
+  });
+
+  // Send lifeline result to the player
+  sendToUser(userId, {
+    type: "lifeline_result",
+    data: {
+      gameId,
+      lifeline,
+      result: newState.lifelineResults,
+    },
+  });
+
+  // Broadcast to other players that a lifeline was used (but not the result)
+  game.players.forEach(player => {
+    if (player.userId !== userId) {
+      sendToUser(player.userId, {
+        type: "game_update",
+        data: {
+          gameId,
+          state: {
+            ...newState,
+            lifelineResults: null, // Hide lifeline results from other players
+          },
+          currentTurn: null,
+        },
+      });
+    }
+  });
+}
+
+async function handleMillionaireWalkAway(data: { gameId: string; userId: string }) {
+  const { gameId, userId } = data;
+  
+  const game = activeGames.get(gameId);
+  if (!game || game.gameType !== 'millionaire') {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "Game not found" },
+    });
+    return;
+  }
+
+  const state = game.state as Millionaire.MillionaireState;
+
+  // Check if player is already eliminated
+  if (state.playerAnswers[userId]?.isEliminated) {
+    sendToUser(userId, {
+      type: "game_error",
+      data: { message: "You are already eliminated" },
+    });
+    return;
+  }
+
+  // Walk away
+  const { newState, prizeWon } = Millionaire.walkAway(state, userId);
+  game.state = newState;
+
+  // Update database
+  await db.game.update({
+    where: { id: gameId },
+    data: {
+      gameState: JSON.stringify(newState),
+    },
+  });
+
+  // Send walk away result to the player
+  sendToUser(userId, {
+    type: "millionaire_walk_away_result",
+    data: {
+      gameId,
+      prizeWon,
+    },
+  });
+
+  // Broadcast game update to all players
+  sendToGamePlayers(gameId, {
+    type: "game_update",
+    data: {
+      gameId,
+      state: newState,
+      currentTurn: null,
+    },
+  });
+
+  // Handle game end if all players eliminated
+  if (newState.status === 'completed') {
+    await db.game.update({
+      where: { id: gameId },
+      data: {
+        status: 'completed',
+        completedAt: new Date(),
+      },
+    });
+
+    sendToGamePlayers(gameId, {
+      type: "game_over",
+      data: {
+        gameId,
+        state: newState,
+      },
+    });
+
+    activeGames.delete(gameId);
+  }
 }
 
 function sendToUser(userId: string, message: any) {

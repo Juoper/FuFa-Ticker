@@ -38,7 +38,12 @@ export function GameStats({ userId, gameType }: GameStatsProps) {
   }, [userId, gameType]);
 
   // Capitalize game type for display
-  const gameTypeDisplay = gameType.charAt(0).toUpperCase() + gameType.slice(1).replace(/([A-Z])/g, ' $1').trim();
+  const gameTypeDisplayMap: { [key: string]: string } = {
+    tictactoe: 'Tic-Tac-Toe',
+    hangman: 'Hangman',
+    millionaire: 'Wer wird Millionär',
+  };
+  const gameTypeDisplay = gameTypeDisplayMap[gameType] || gameType.charAt(0).toUpperCase() + gameType.slice(1).replace(/([A-Z])/g, ' $1').trim();
   
   if (loading) {
     return (

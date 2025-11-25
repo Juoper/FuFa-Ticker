@@ -37,14 +37,14 @@ export function OnlinePlayers({
   onDeclineChallenge,
   isInGame,
 }: OnlinePlayersProps) {
-  const [selectedGameType, setSelectedGameType] = useState<'tictactoe' | 'hangman'>('tictactoe');
+  const [selectedGameType, setSelectedGameType] = useState<'tictactoe' | 'hangman' | 'millionaire'>('tictactoe');
   const [selectedPlayers, setSelectedPlayers] = useState<string[]>([]);
   const [isSelectingPlayers, setIsSelectingPlayers] = useState(false);
   
   // Filter out current user
   const otherUsers = users.filter((user) => user.id !== currentUserId);
 
-  const handleGameTypeChange = (gameType: 'tictactoe' | 'hangman') => {
+  const handleGameTypeChange = (gameType: 'tictactoe' | 'hangman' | 'millionaire') => {
     setSelectedGameType(gameType);
     setSelectedPlayers([]);
     setIsSelectingPlayers(false);
@@ -67,8 +67,8 @@ export function OnlinePlayers({
   };
 
   const handleQuickChallenge = (userId: string) => {
-    if (selectedGameType === 'hangman') {
-      // For hangman, go into selection mode
+    if (selectedGameType === 'hangman' || selectedGameType === 'millionaire') {
+      // For multiplayer games, go into selection mode
       setIsSelectingPlayers(true);
       setSelectedPlayers([userId]);
     } else {
@@ -85,10 +85,10 @@ export function OnlinePlayers({
       {!isInGame && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg">
           <p className="text-sm text-gray-600 mb-2">Select Game Type:</p>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={() => handleGameTypeChange('tictactoe')}
-              className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
+              className={`px-4 py-2 rounded-lg font-medium transition ${
                 selectedGameType === 'tictactoe'
                   ? 'bg-blue-500 text-white'
                   : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
@@ -98,17 +98,27 @@ export function OnlinePlayers({
             </button>
             <button
               onClick={() => handleGameTypeChange('hangman')}
-              className={`flex-1 px-4 py-2 rounded-lg font-medium transition ${
+              className={`px-4 py-2 rounded-lg font-medium transition ${
                 selectedGameType === 'hangman'
                   ? 'bg-purple-500 text-white'
                   : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
               }`}
             >
-              Hangman (2-8 players)
+              Hangman (2-8)
+            </button>
+            <button
+              onClick={() => handleGameTypeChange('millionaire')}
+              className={`px-4 py-2 rounded-lg font-medium transition ${
+                selectedGameType === 'millionaire'
+                  ? 'bg-yellow-500 text-blue-950'
+                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-100'
+              }`}
+            >
+              Millionär (2-10)
             </button>
           </div>
           
-          {/* Multiplayer Selection Mode */}
+          {/* Multiplayer Selection Mode - Hangman */}
           {isSelectingPlayers && selectedGameType === 'hangman' && (
             <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
               <div className="flex items-center justify-between mb-2">
@@ -129,6 +139,33 @@ export function OnlinePlayers({
                 onClick={handleSendMultiplayerChallenge}
                 disabled={selectedPlayers.length === 0 || selectedPlayers.length > 7}
                 className="w-full px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                Send Challenge to {selectedPlayers.length} Player{selectedPlayers.length !== 1 ? 's' : ''}
+              </button>
+            </div>
+          )}
+          
+          {/* Multiplayer Selection Mode - Millionaire */}
+          {isSelectingPlayers && selectedGameType === 'millionaire' && (
+            <div className="mt-3 p-3 bg-yellow-50 border border-yellow-400 rounded">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-yellow-900">
+                  Select 1-10 players for Millionär ({selectedPlayers.length} selected)
+                </p>
+                <button
+                  onClick={() => {
+                    setIsSelectingPlayers(false);
+                    setSelectedPlayers([]);
+                  }}
+                  className="text-xs text-yellow-700 hover:text-yellow-900"
+                >
+                  Cancel
+                </button>
+              </div>
+              <button
+                onClick={handleSendMultiplayerChallenge}
+                disabled={selectedPlayers.length === 0 || selectedPlayers.length > 10}
+                className="w-full px-4 py-2 bg-yellow-500 text-blue-950 rounded-lg hover:bg-yellow-600 transition font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
                 Send Challenge to {selectedPlayers.length} Player{selectedPlayers.length !== 1 ? 's' : ''}
               </button>
@@ -236,25 +273,29 @@ export function OnlinePlayers({
               <div
                 key={user.id}
                 className={`flex items-center justify-between p-3 rounded-lg transition ${
-                  isSelectingPlayers && selectedGameType === 'hangman'
+                  isSelectingPlayers && (selectedGameType === 'hangman' || selectedGameType === 'millionaire')
                     ? isSelected
-                      ? 'bg-purple-100 border-2 border-purple-500'
+                      ? selectedGameType === 'millionaire'
+                        ? 'bg-yellow-100 border-2 border-yellow-500'
+                        : 'bg-purple-100 border-2 border-purple-500'
                       : 'bg-gray-50 hover:bg-gray-100 cursor-pointer'
                     : 'bg-gray-50 hover:bg-gray-100'
                 }`}
                 onClick={() => {
-                  if (isSelectingPlayers && selectedGameType === 'hangman' && !hasPendingChallenge && !hasIncomingChallenge) {
+                  if (isSelectingPlayers && (selectedGameType === 'hangman' || selectedGameType === 'millionaire') && !hasPendingChallenge && !hasIncomingChallenge) {
                     togglePlayerSelection(user.id);
                   }
                 }}
               >
                 <div className="flex items-center gap-3">
-                  {isSelectingPlayers && selectedGameType === 'hangman' && !hasPendingChallenge && !hasIncomingChallenge ? (
+                  {isSelectingPlayers && (selectedGameType === 'hangman' || selectedGameType === 'millionaire') && !hasPendingChallenge && !hasIncomingChallenge ? (
                     <input
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => togglePlayerSelection(user.id)}
-                      className="w-4 h-4 text-purple-600 cursor-pointer"
+                      className={`w-4 h-4 cursor-pointer ${
+                        selectedGameType === 'millionaire' ? 'text-yellow-600' : 'text-purple-600'
+                      }`}
                     />
                   ) : (
                     <div className="w-3 h-3 bg-green-500 rounded-full"></div>
@@ -269,7 +310,9 @@ export function OnlinePlayers({
                       className={`px-4 py-2 rounded hover:opacity-90 transition text-sm font-medium ${
                         selectedGameType === 'tictactoe'
                           ? 'bg-blue-500 text-white'
-                          : 'bg-purple-500 text-white'
+                          : selectedGameType === 'hangman'
+                          ? 'bg-purple-500 text-white'
+                          : 'bg-yellow-500 text-blue-950'
                       }`}
                     >
                       Challenge

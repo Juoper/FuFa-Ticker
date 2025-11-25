@@ -6,6 +6,7 @@ import { useWebSocket, type WebSocketMessage } from "~/hooks/useWebSocket";
 import { OnlinePlayers } from "~/components/OnlinePlayers";
 import { TicTacToeGame } from "~/components/TicTacToeGame";
 import { HangmanGame } from "~/components/HangmanGame";
+import { MillionaireGame } from "~/components/MillionaireGame";
 import { GameStats } from "~/components/GameStats";
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -262,6 +263,35 @@ export default function Games() {
     }
   };
 
+  const handleMillionaireAnswer = (answer: string) => {
+    if (currentGame) {
+      sendMessage("millionaire_answer", {
+        gameId: currentGame.gameId,
+        userId: user.id,
+        answer,
+      });
+    }
+  };
+
+  const handleUseLifeline = (lifeline: string) => {
+    if (currentGame) {
+      sendMessage("use_lifeline", {
+        gameId: currentGame.gameId,
+        userId: user.id,
+        lifeline,
+      });
+    }
+  };
+
+  const handleMillionaireWalkAway = () => {
+    if (currentGame) {
+      sendMessage("millionaire_walk_away", {
+        gameId: currentGame.gameId,
+        userId: user.id,
+      });
+    }
+  };
+
   const handleForfeit = () => {
     if (currentGame) {
       if (confirm("Are you sure you want to forfeit this game?")) {
@@ -349,6 +379,19 @@ export default function Games() {
                   disconnectedPlayers={currentGame.disconnectedPlayers}
                 />
               )}
+              {currentGame.gameType === "millionaire" && (
+                <MillionaireGame
+                  gameId={currentGame.gameId}
+                  players={currentGame.players}
+                  gameState={currentGame.state}
+                  currentUserId={user.id}
+                  onAnswer={handleMillionaireAnswer}
+                  onUseLifeline={handleUseLifeline}
+                  onWalkAway={handleMillionaireWalkAway}
+                  onForfeit={handleForfeit}
+                  disconnectedPlayers={currentGame.disconnectedPlayers}
+                />
+              )}
             </div>
             <div className="space-y-6">
               <GameStats userId={user.id} gameType={currentGame.gameType} />
@@ -373,6 +416,7 @@ export default function Games() {
             <div className="space-y-6">
               <GameStats userId={user.id} gameType="tictactoe" />
               <GameStats userId={user.id} gameType="hangman" />
+              <GameStats userId={user.id} gameType="millionaire" />
             </div>
           </div>
         )}
