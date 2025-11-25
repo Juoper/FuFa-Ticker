@@ -11,6 +11,9 @@ const clients = new Set<WebSocket>();
 // User tracking: userId -> WebSocket
 const userConnections = new Map<string, WebSocket>();
 
+// Connection health tracking
+const connectionHealth = new Map<WebSocket, { lastPing: Date; userId?: string }>();
+
 // Game state: gameId -> game state
 interface GameState {
   id: string;
@@ -46,12 +49,26 @@ export function setupWebSocketServer(server: Server) {
 
   wss = new WebSocketServer({ 
     server,
-    path: "/ws"
+    path: "/ws",
+    // Increase max payload size if needed
+    maxPayload: 10 * 1024 * 1024, // 10MB
+    // Client tracking for pings
+    clientTracking: true,
   });
 
   wss.on("connection", (ws: WebSocket) => {
     console.log("Client connected");
     clients.add(ws);
+    
+    // Initialize connection health tracking
+    connectionHealth.set(ws, { lastPing: new Date() });
+
+    // Send initial ping to verify connection
+    try {
+      ws.ping();
+    } catch (error) {
+      console.error("Error sending initial ping:", error);
+    }
 
     ws.on("message", async (data: Buffer) => {
       try {
@@ -59,11 +76,30 @@ export function setupWebSocketServer(server: Server) {
         await handleWebSocketMessage(ws, message);
       } catch (error) {
         console.error("Error handling WebSocket message:", error);
+        // Send error response to client
+        if (ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({
+              type: "error",
+              data: { message: "Failed to process message" }
+            }));
+          } catch (sendError) {
+            console.error("Failed to send error message:", sendError);
+          }
+        }
       }
     });
 
-    ws.on("close", () => {
-      console.log("Client disconnected");
+    // Handle pong responses (native WebSocket ping/pong)
+    ws.on("pong", () => {
+      const health = connectionHealth.get(ws);
+      if (health) {
+        health.lastPing = new Date();
+      }
+    });
+
+    ws.on("close", (code, reason) => {
+      console.log(`Client disconnected (code: ${code}, reason: ${reason.toString() || 'none'})`);
       handleDisconnect(ws);
     });
 
@@ -73,7 +109,61 @@ export function setupWebSocketServer(server: Server) {
     });
   });
 
-  console.log("WebSocket server initialized");
+  // Set up periodic health check and ping
+  const healthCheckInterval = setInterval(() => {
+    if (!wss) return;
+
+    const now = new Date();
+    const staleThreshold = 60000; // 60 seconds
+
+    wss.clients.forEach((ws: WebSocket) => {
+      const health = connectionHealth.get(ws);
+      
+      if (!health) {
+        // Connection without health tracking, initialize it
+        connectionHealth.set(ws, { lastPing: now });
+        return;
+      }
+
+      // Check if connection is stale
+      const timeSinceLastPing = now.getTime() - health.lastPing.getTime();
+      
+      if (timeSinceLastPing > staleThreshold) {
+        console.log(`Terminating stale connection (${timeSinceLastPing}ms since last ping)`);
+        try {
+          ws.terminate();
+        } catch (error) {
+          console.error("Error terminating stale connection:", error);
+        }
+        return;
+      }
+
+      // Send ping
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.ping();
+        } catch (error) {
+          console.error("Error sending ping:", error);
+          // Connection might be dead, try to close it
+          try {
+            ws.terminate();
+          } catch (termError) {
+            console.error("Error terminating connection:", termError);
+          }
+        }
+      } else if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+        // Clean up closed connections
+        handleDisconnect(ws);
+      }
+    });
+  }, 30000); // Check every 30 seconds
+
+  // Clean up interval on server shutdown
+  wss.on("close", () => {
+    clearInterval(healthCheckInterval);
+  });
+
+  console.log("WebSocket server initialized with health monitoring");
   return wss;
 }
 
@@ -81,6 +171,21 @@ async function handleWebSocketMessage(ws: WebSocket, message: any) {
   const { type, data } = message;
 
   switch (type) {
+    case "ping":
+      // Respond to heartbeat ping
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: "pong", data: {} }));
+        } catch (error) {
+          console.error("Error sending pong:", error);
+        }
+      }
+      // Update health tracking
+      const health = connectionHealth.get(ws);
+      if (health) {
+        health.lastPing = new Date();
+      }
+      break;
     case "register":
       await handleRegisterUser(ws, data);
       break;
@@ -119,9 +224,33 @@ async function handleWebSocketMessage(ws: WebSocket, message: any) {
 async function handleRegisterUser(ws: WebSocket, data: { userId: string; userName: string }) {
   const { userId, userName } = data;
   
-  // Store the connection
+  // Check if user already has a connection
+  const existingWs = userConnections.get(userId);
+  if (existingWs && existingWs !== ws) {
+    console.log(`User ${userName} (${userId}) reconnecting, closing old connection`);
+    try {
+      existingWs.close(1000, "New connection established");
+    } catch (error) {
+      console.error("Error closing old connection:", error);
+    }
+    // Clean up old connection
+    const oldHealth = connectionHealth.get(existingWs);
+    if (oldHealth) {
+      connectionHealth.delete(existingWs);
+    }
+    wsToUser.delete(existingWs);
+    clients.delete(existingWs);
+  }
+  
+  // Store the new connection
   userConnections.set(userId, ws);
   wsToUser.set(ws, userId);
+  
+  // Update health tracking with userId
+  const health = connectionHealth.get(ws);
+  if (health) {
+    health.userId = userId;
+  }
   
   console.log(`User ${userName} (${userId}) registered`);
 
@@ -138,6 +267,8 @@ async function handleRegisterUser(ws: WebSocket, data: { userId: string; userNam
           clearTimeout(timer);
           game.disconnectTimers.delete(userId);
         }
+
+        console.log(`User ${userName} (${userId}) reconnected to game ${gameId}`);
 
         // Notify all players in the game about reconnection
         sendToGamePlayers(gameId, {
@@ -165,68 +296,84 @@ async function handleRegisterUser(ws: WebSocket, data: { userId: string; userNam
 
 function handleDisconnect(ws: WebSocket) {
   clients.delete(ws);
+  connectionHealth.delete(ws);
   
   const userId = wsToUser.get(ws);
   if (userId) {
-    userConnections.delete(userId);
+    // Only remove from userConnections if this is the current connection for this user
+    const currentWs = userConnections.get(userId);
+    if (currentWs === ws) {
+      userConnections.delete(userId);
+      console.log(`User ${userId} disconnected (primary connection)`);
+    } else {
+      console.log(`User ${userId} secondary connection closed`);
+    }
     wsToUser.delete(ws);
     
-    // Handle game disconnection with grace period
-    for (const [gameId, game] of activeGames.entries()) {
-      const player = game.players.find(p => p.userId === userId);
-      if (player) {
-        game.disconnectedPlayers.add(userId);
-        
-        // Set a timer to end the game if user doesn't reconnect in 5 minutes
-        const timer = setTimeout(() => {
-          handlePlayerAbandon(gameId, userId);
-        }, 5 * 60 * 1000); // 5 minutes
-        
-        game.disconnectTimers.set(userId, timer);
+    // Only handle game/challenge disconnection if this was the primary connection
+    if (currentWs === ws) {
+      // Handle game disconnection with grace period
+      for (const [gameId, game] of activeGames.entries()) {
+        const player = game.players.find(p => p.userId === userId);
+        if (player) {
+          // Check if not already marked as disconnected
+          if (!game.disconnectedPlayers.has(userId)) {
+            game.disconnectedPlayers.add(userId);
+            
+            // Set a timer to end the game if user doesn't reconnect in 5 minutes
+            const timer = setTimeout(() => {
+              handlePlayerAbandon(gameId, userId);
+            }, 5 * 60 * 1000); // 5 minutes
+            
+            game.disconnectTimers.set(userId, timer);
 
-        // Notify other players
-        sendToGamePlayers(gameId, {
-          type: "player_disconnected",
-          data: { userId, userName: player.userName, gameId },
-        });
-      }
-    }
-    
-    // Cancel any challenges from this user
-    for (const [challengeId, challenge] of pendingChallenges.entries()) {
-      if (challenge.fromUserId === userId || challenge.toUserIds.includes(userId)) {
-        clearTimeout(challenge.timeout);
-        pendingChallenges.delete(challengeId);
-        
-        // Notify all other parties
-        if (challenge.fromUserId === userId) {
-          // Challenger disconnected, notify all challenged users
-          challenge.toUserIds.forEach(id => {
-            sendToUser(id, {
-              type: "challenge_cancelled",
-              data: { challengeId, reason: "User disconnected" },
+            console.log(`Player ${player.userName} disconnected from game ${gameId}, grace period started`);
+
+            // Notify other players
+            sendToGamePlayers(gameId, {
+              type: "player_disconnected",
+              data: { userId, userName: player.userName, gameId },
             });
-          });
-        } else {
-          // One of the challenged users disconnected
-          sendToUser(challenge.fromUserId, {
-            type: "challenge_cancelled",
-            data: { challengeId, reason: "User disconnected" },
-          });
-          // Notify other challenged users
-          challenge.toUserIds.forEach(id => {
-            if (id !== userId) {
+          }
+        }
+      }
+      
+      // Cancel any challenges from this user
+      for (const [challengeId, challenge] of pendingChallenges.entries()) {
+        if (challenge.fromUserId === userId || challenge.toUserIds.includes(userId)) {
+          clearTimeout(challenge.timeout);
+          pendingChallenges.delete(challengeId);
+          
+          // Notify all other parties
+          if (challenge.fromUserId === userId) {
+            // Challenger disconnected, notify all challenged users
+            challenge.toUserIds.forEach(id => {
               sendToUser(id, {
                 type: "challenge_cancelled",
                 data: { challengeId, reason: "User disconnected" },
               });
-            }
-          });
+            });
+          } else {
+            // One of the challenged users disconnected
+            sendToUser(challenge.fromUserId, {
+              type: "challenge_cancelled",
+              data: { challengeId, reason: "User disconnected" },
+            });
+            // Notify other challenged users
+            challenge.toUserIds.forEach(id => {
+              if (id !== userId) {
+                sendToUser(id, {
+                  type: "challenge_cancelled",
+                  data: { challengeId, reason: "User disconnected" },
+                });
+              }
+            });
+          }
         }
       }
+      
+      broadcastOnlineUsers();
     }
-    
-    broadcastOnlineUsers();
   }
 }
 
