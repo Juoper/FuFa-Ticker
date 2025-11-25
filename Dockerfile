@@ -26,23 +26,23 @@ COPY . /app/
 RUN npm run build
 
 FROM node:20-alpine
-# Copy package files
-COPY ./package.json package-lock.json /app/
-# Copy production dependencies
-COPY --from=production-dependencies-env /app/node_modules /app/node_modules
-# Copy built application
-COPY --from=build-env /app/build /app/build
-# Copy Prisma schema and generated client
-COPY --from=build-env /app/prisma /app/prisma
-COPY --from=build-env /app/node_modules/.prisma /app/node_modules/.prisma
-COPY --from=build-env /app/node_modules/@prisma /app/node_modules/@prisma
-# Copy server file and app directory (needed for imports)
-COPY --from=build-env /app/server.ts /app/server.ts
-COPY --from=build-env /app/app /app/app
-# Copy public directory for uploads
-COPY --from=build-env /app/public /app/public
-
 WORKDIR /app
+
+# Copy package files
+COPY --from=build-env /app/package.json /app/package-lock.json ./
+# Copy production dependencies
+COPY --from=production-dependencies-env /app/node_modules ./node_modules
+# Copy built application
+COPY --from=build-env /app/build ./build
+# Copy Prisma schema and generated client
+COPY --from=build-env /app/prisma ./prisma
+COPY --from=build-env /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build-env /app/node_modules/@prisma ./node_modules/@prisma
+# Copy server file and app directory (needed for imports)
+COPY --from=build-env /app/server.ts ./server.ts
+COPY --from=build-env /app/app ./app
+# Copy public directory for uploads
+COPY --from=build-env /app/public ./public
 
 # Create upload directories
 RUN mkdir -p /app/public/uploads/memes
@@ -54,4 +54,4 @@ ENV DATABASE_URL="file:./prisma/dev.db"
 EXPOSE 3000
 
 # Run migrations, seed, and start the server
-CMD sh -c "npx prisma migrate deploy --schema=/app/prisma/schema.prisma && npm run seed && npm run start"
+CMD sh -c "npx prisma migrate deploy && npm run seed && npm run start"
