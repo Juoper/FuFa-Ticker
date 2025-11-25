@@ -207,7 +207,7 @@ export default function Home() {
     }
   }, [revalidator]);
 
-  const { isConnected } = useWebSocket(handleWebSocketMessage);
+  const { isConnected, connectionStatus } = useWebSocket(handleWebSocketMessage);
 
   if (!user) {
     return (
@@ -220,6 +220,28 @@ export default function Home() {
     );
   }
 
+  const getStatusColor = () => {
+    switch (connectionStatus) {
+      case "connected":
+        return "bg-green-500";
+      case "reconnecting":
+        return "bg-yellow-500";
+      default:
+        return "bg-red-500";
+    }
+  };
+
+  const getStatusText = () => {
+    switch (connectionStatus) {
+      case "connected":
+        return "Live";
+      case "reconnecting":
+        return "Reconnecting...";
+      default:
+        return "Disconnected";
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       {/* Timetable */}
@@ -230,12 +252,12 @@ export default function Home() {
           <h1 className="text-3xl font-bold">Live Feed</h1>
           <div className="flex items-center space-x-2">
             <div
-              className={`w-2 h-2 rounded-full ${
-                isConnected ? "bg-green-500" : "bg-red-500"
+              className={`w-2 h-2 rounded-full ${getStatusColor()} ${
+                connectionStatus === "reconnecting" ? "animate-pulse" : ""
               }`}
             />
             <span className="text-sm text-gray-600">
-              {isConnected ? "Live" : "Disconnected"}
+              {getStatusText()}
             </span>
           </div>
         </div>

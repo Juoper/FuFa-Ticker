@@ -27,12 +27,15 @@ const MAX_RECONNECT_DELAY = 30000; // 30 seconds
 const HEARTBEAT_INTERVAL = 30000; // 30 seconds
 const HEARTBEAT_TIMEOUT = 5000; // 5 seconds to wait for pong
 
+export type ConnectionStatus = "connected" | "disconnected" | "reconnecting";
+
 export function useWebSocket(
   onMessage: (message: WebSocketMessage) => void,
   userId?: string,
   userName?: string
 ) {
   const [isConnected, setIsConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
@@ -130,6 +133,7 @@ export function useWebSocket(
 
           console.log("WebSocket connected");
           setIsConnected(true);
+          setConnectionStatus("connected");
           registeredRef.current = false;
           
           // Reset reconnection tracking
@@ -194,6 +198,7 @@ export function useWebSocket(
           }
           
           setIsConnected(false);
+          setConnectionStatus("reconnecting");
           wsRef.current = null;
           registeredRef.current = false;
 
@@ -265,6 +270,6 @@ export function useWebSocket(
     };
   }, [userId, userName, startHeartbeat, clearHeartbeat]);
 
-  return { isConnected, sendMessage };
+  return { isConnected, connectionStatus, sendMessage };
 }
 

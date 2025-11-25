@@ -201,7 +201,7 @@ export default function Games() {
     }
   }, [user.id, user.name]);
 
-  const { isConnected, sendMessage } = useWebSocket(
+  const { isConnected, connectionStatus, sendMessage } = useWebSocket(
     handleWebSocketMessage,
     user.id,
     user.name
@@ -319,20 +319,36 @@ export default function Games() {
             <div className="flex items-center gap-3">
               <div
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-                  isConnected ? "bg-green-50" : "bg-red-50"
+                  connectionStatus === "connected"
+                    ? "bg-green-50"
+                    : connectionStatus === "reconnecting"
+                    ? "bg-yellow-50"
+                    : "bg-red-50"
                 }`}
               >
                 <div
                   className={`w-3 h-3 rounded-full ${
-                    isConnected ? "bg-green-500" : "bg-red-500"
+                    connectionStatus === "connected"
+                      ? "bg-green-500"
+                      : connectionStatus === "reconnecting"
+                      ? "bg-yellow-500 animate-pulse"
+                      : "bg-red-500"
                   }`}
                 ></div>
                 <span
                   className={`text-sm font-medium ${
-                    isConnected ? "text-green-700" : "text-red-700"
+                    connectionStatus === "connected"
+                      ? "text-green-700"
+                      : connectionStatus === "reconnecting"
+                      ? "text-yellow-700"
+                      : "text-red-700"
                   }`}
                 >
-                  {isConnected ? "Connected" : "Disconnected"}
+                  {connectionStatus === "connected"
+                    ? "Connected"
+                    : connectionStatus === "reconnecting"
+                    ? "Reconnecting..."
+                    : "Disconnected"}
                 </span>
               </div>
             </div>
