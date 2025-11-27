@@ -18,7 +18,9 @@ export interface WebSocketMessage {
     | "game_error"
     | "player_reconnected"
     | "player_disconnected"
-    | "pong"; // Heartbeat response
+    | "pong" // Heartbeat response
+    | "question_added"
+    | "question_updated";
   data: any;
 }
 
@@ -102,7 +104,6 @@ export function useWebSocket(
     isMountedRef.current = true;
 
     function connect() {
-      // Don't attempt to connect if component is unmounted
       if (!isMountedRef.current) return;
 
       // Close existing connection if any
@@ -115,15 +116,11 @@ export function useWebSocket(
         wsRef.current = null;
       }
 
-      // Determine WebSocket URL based on current location
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-      console.log(`Attempting WebSocket connection... (attempt ${reconnectAttemptsRef.current + 1})`);
-
       try {
         const ws = new WebSocket(wsUrl);
-        let pingResponseReceived = false;
 
         ws.onopen = () => {
           if (!isMountedRef.current) {
@@ -131,16 +128,13 @@ export function useWebSocket(
             return;
           }
 
-          console.log("WebSocket connected");
           setIsConnected(true);
           setConnectionStatus("connected");
           registeredRef.current = false;
           
-          // Reset reconnection tracking
           reconnectAttemptsRef.current = 0;
           reconnectDelayRef.current = INITIAL_RECONNECT_DELAY;
           
-          // Register user if userId and userName are provided
           if (userId && userName) {
             try {
               ws.send(JSON.stringify({
@@ -153,13 +147,11 @@ export function useWebSocket(
             }
           }
 
-          // Clear any pending reconnect
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
           }
 
-          // Start heartbeat
           startHeartbeat();
         };
 
@@ -167,7 +159,6 @@ export function useWebSocket(
           try {
             const message = JSON.parse(event.data) as WebSocketMessage;
             
-            // Handle pong responses for heartbeat
             if (message.type === "pong") {
               if (heartbeatTimeoutRef.current) {
                 clearTimeout(heartbeatTimeoutRef.current);
@@ -176,7 +167,6 @@ export function useWebSocket(
               return;
             }
             
-            // Call the current message handler
             onMessageRef.current(message);
           } catch (error) {
             console.error("Failed to parse WebSocket message:", error);
@@ -185,12 +175,9 @@ export function useWebSocket(
 
         ws.onerror = (error) => {
           console.error("WebSocket error:", error);
-          // The onclose handler will handle reconnection
         };
 
         ws.onclose = (event) => {
-          console.log(`WebSocket disconnected (code: ${event.code}, reason: ${event.reason || 'none'})`);
-          
           clearHeartbeat();
           
           if (!isMountedRef.current) {
@@ -202,22 +189,16 @@ export function useWebSocket(
           wsRef.current = null;
           registeredRef.current = false;
 
-          // Implement exponential backoff for reconnection
           reconnectAttemptsRef.current++;
           
-          // Calculate next delay with exponential backoff
           const nextDelay = Math.min(
             reconnectDelayRef.current * Math.pow(1.5, reconnectAttemptsRef.current - 1),
             MAX_RECONNECT_DELAY
           );
           reconnectDelayRef.current = nextDelay;
 
-          console.log(`Reconnecting in ${Math.round(nextDelay / 1000)}s...`);
-
-          // Attempt to reconnect
           reconnectTimeoutRef.current = setTimeout(() => {
             if (isMountedRef.current) {
-              console.log("Attempting to reconnect...");
               connect();
             }
           }, nextDelay);
@@ -231,7 +212,6 @@ export function useWebSocket(
           return;
         }
         
-        // Retry connection with exponential backoff
         reconnectAttemptsRef.current++;
         const nextDelay = Math.min(
           reconnectDelayRef.current * Math.pow(1.5, reconnectAttemptsRef.current - 1),
@@ -268,7 +248,8 @@ export function useWebSocket(
         wsRef.current = null;
       }
     };
-  }, [userId, userName, startHeartbeat, clearHeartbeat]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, userName]);
 
   return { isConnected, connectionStatus, sendMessage };
 }

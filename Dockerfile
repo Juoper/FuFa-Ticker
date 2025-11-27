@@ -52,6 +52,7 @@ ENV DATABASE_URL="file:./prisma/dev.db"
 
 # Expose port
 EXPOSE 3000
+EXPOSE 5555
 
 # Run migrations, seed, and start the server
-CMD sh -c "npx prisma migrate deploy && npm run seed && npm run start"
+CMD sh -c "npx prisma migrate deploy && npm run seed && (npx prisma studio --port 5555 --hostname 0.0.0.0 & npm run start)"

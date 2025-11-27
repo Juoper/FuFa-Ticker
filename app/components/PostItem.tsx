@@ -4,7 +4,7 @@ import { Form } from "react-router";
 interface Post {
   id: string;
   content: string;
-  createdAt: string;
+  createdAt: string | Date;
   user: {
     name: string;
   };

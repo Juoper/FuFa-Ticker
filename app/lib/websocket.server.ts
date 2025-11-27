@@ -4,15 +4,23 @@ import { prisma as db } from "./db.server";
 import * as TicTacToe from "./tictactoe.server";
 import * as Hangman from "./hangman.server";
 import * as Millionaire from "./millionaire.server";
+import * as QA from "./qa.server";
 
-let wss: WebSocketServer | null = null;
-const clients = new Set<WebSocket>();
+// Use global to persist state across HMR reloads in development
+declare global {
+  var __wsServer: WebSocketServer | undefined;
+  var __wsClients: Set<WebSocket> | undefined;
+  var __wsUserConnections: Map<string, WebSocket> | undefined;
+  var __wsConnectionHealth: Map<WebSocket, { lastPing: Date; userId?: string }> | undefined;
+  var __wsToUser: Map<WebSocket, string> | undefined;
+  var __wsActiveGames: Map<string, GameState> | undefined;
+  var __wsPendingChallenges: Map<string, Challenge> | undefined;
+}
 
-// User tracking: userId -> WebSocket
-const userConnections = new Map<string, WebSocket>();
-
-// Connection health tracking
-const connectionHealth = new Map<WebSocket, { lastPing: Date; userId?: string }>();
+let wss: WebSocketServer | null = global.__wsServer || null;
+const clients = global.__wsClients || (global.__wsClients = new Set<WebSocket>());
+const userConnections = global.__wsUserConnections || (global.__wsUserConnections = new Map<string, WebSocket>());
+const connectionHealth = global.__wsConnectionHealth || (global.__wsConnectionHealth = new Map<WebSocket, { lastPing: Date; userId?: string }>());
 
 // Game state: gameId -> game state
 interface GameState {
@@ -23,7 +31,7 @@ interface GameState {
   disconnectedPlayers: Set<string>;
   disconnectTimers: Map<string, NodeJS.Timeout>;
 }
-const activeGames = new Map<string, GameState>();
+const activeGames = global.__wsActiveGames || (global.__wsActiveGames = new Map<string, GameState>());
 
 // Challenge system: challengeId -> challenge info
 interface Challenge {
@@ -37,13 +45,14 @@ interface Challenge {
   acceptedBy: Set<string>; // Track who has accepted (for multiplayer)
   declinedBy: Set<string>; // Track who has declined
 }
-const pendingChallenges = new Map<string, Challenge>();
+const pendingChallenges = global.__wsPendingChallenges || (global.__wsPendingChallenges = new Map<string, Challenge>());
 
 // Track userId for each WebSocket
-const wsToUser = new Map<WebSocket, string>();
+const wsToUser = global.__wsToUser || (global.__wsToUser = new Map<WebSocket, string>());
 
 export function setupWebSocketServer(server: Server) {
-  if (wss) {
+  if (wss || global.__wsServer) {
+    wss = global.__wsServer!;
     return wss;
   }
 
@@ -57,10 +66,7 @@ export function setupWebSocketServer(server: Server) {
   });
 
   wss.on("connection", (ws: WebSocket) => {
-    console.log("Client connected");
     clients.add(ws);
-    
-    // Initialize connection health tracking
     connectionHealth.set(ws, { lastPing: new Date() });
 
     // Send initial ping to verify connection
@@ -98,8 +104,7 @@ export function setupWebSocketServer(server: Server) {
       }
     });
 
-    ws.on("close", (code, reason) => {
-      console.log(`Client disconnected (code: ${code}, reason: ${reason.toString() || 'none'})`);
+    ws.on("close", () => {
       handleDisconnect(ws);
     });
 
@@ -164,6 +169,7 @@ export function setupWebSocketServer(server: Server) {
   });
 
   console.log("WebSocket server initialized with health monitoring");
+  global.__wsServer = wss;
   return wss;
 }
 
@@ -216,6 +222,16 @@ async function handleWebSocketMessage(ws: WebSocket, message: any) {
     case "millionaire_walk_away":
       await handleMillionaireWalkAway(data);
       break;
+    // Q&A Events
+    case "add_question":
+      await handleAddQuestion(ws, data);
+      break;
+    case "upvote_question":
+      await handleUpvoteQuestion(ws, data);
+      break;
+    case "resolve_question":
+      await handleResolveQuestion(ws, data);
+      break;
     default:
       console.log("Unknown message type:", type);
   }
@@ -227,7 +243,6 @@ async function handleRegisterUser(ws: WebSocket, data: { userId: string; userNam
   // Check if user already has a connection
   const existingWs = userConnections.get(userId);
   if (existingWs && existingWs !== ws) {
-    console.log(`User ${userName} (${userId}) reconnecting, closing old connection`);
     try {
       existingWs.close(1000, "New connection established");
     } catch (error) {
@@ -242,6 +257,11 @@ async function handleRegisterUser(ws: WebSocket, data: { userId: string; userNam
     clients.delete(existingWs);
   }
   
+  // Ensure current connection is in clients set
+  if (!clients.has(ws)) {
+    clients.add(ws);
+  }
+  
   // Store the new connection
   userConnections.set(userId, ws);
   wsToUser.set(ws, userId);
@@ -251,8 +271,6 @@ async function handleRegisterUser(ws: WebSocket, data: { userId: string; userNam
   if (health) {
     health.userId = userId;
   }
-  
-  console.log(`User ${userName} (${userId}) registered`);
 
   // Check if user was in a game and handle reconnection
   for (const [gameId, game] of activeGames.entries()) {
@@ -304,9 +322,6 @@ function handleDisconnect(ws: WebSocket) {
     const currentWs = userConnections.get(userId);
     if (currentWs === ws) {
       userConnections.delete(userId);
-      console.log(`User ${userId} disconnected (primary connection)`);
-    } else {
-      console.log(`User ${userId} secondary connection closed`);
     }
     wsToUser.delete(ws);
     
@@ -1609,6 +1624,86 @@ async function handleMillionaireWalkAway(data: { gameId: string; userId: string 
 
     activeGames.delete(gameId);
   }
+}
+
+// Q&A Handlers
+
+async function handleAddQuestion(ws: WebSocket, data: { content: string }) {
+  const userId = wsToUser.get(ws);
+  if (!userId) return;
+
+  try {
+    const question = await QA.createQuestion(userId, data.content);
+    broadcastNewQuestion(question, userId);
+  } catch (error) {
+    console.error("Error adding question:", error);
+  }
+}
+
+async function handleUpvoteQuestion(ws: WebSocket, data: { questionId: string }) {
+  const userId = wsToUser.get(ws);
+  if (!userId) return;
+
+  try {
+    const updatedQuestion = await QA.upvoteQuestion(userId, data.questionId);
+    if (!updatedQuestion) return;
+
+    broadcastQuestionUpdate(updatedQuestion);
+  } catch (error) {
+    console.error("Error upvoting question:", error);
+  }
+}
+
+async function handleResolveQuestion(ws: WebSocket, data: { questionId: string }) {
+  const userId = wsToUser.get(ws);
+  if (!userId) return;
+
+  try {
+    const updatedQuestion = await QA.resolveQuestion(userId, data.questionId);
+    broadcastQuestionUpdate(updatedQuestion);
+  } catch (error) {
+    console.error("Error resolving question:", error);
+  }
+}
+
+export function broadcastNewQuestion(question: any, creatorId?: string) {
+  const publicQuestion = {
+    ...question,
+    upvotes: question.upvotes || 0,
+    isUpvoted: false,
+    isOwner: false,
+    userId: undefined,
+  };
+
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      const clientUserId = wsToUser.get(client);
+      const message = {
+        type: "question_added",
+        data: {
+          ...publicQuestion,
+          isOwner: creatorId ? clientUserId === creatorId : false,
+        }
+      };
+      client.send(JSON.stringify(message));
+    }
+  });
+}
+
+export function broadcastQuestionUpdate(question: any) {
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      const message = {
+        type: "question_updated",
+        data: {
+          id: question.id,
+          upvotes: question.upvotes,
+          resolved: question.resolved,
+        }
+      };
+      client.send(JSON.stringify(message));
+    }
+  });
 }
 
 function sendToUser(userId: string, message: any) {

@@ -4,6 +4,7 @@ export default [
   index("routes/home.tsx"),
   route("memes", "routes/memes.tsx"),
   route("games", "routes/games.tsx"),
+  route("qa", "routes/qa.tsx"),
   route("api/preview-meme", "routes/api.preview-meme.tsx"),
   route("api/game-stats", "routes/api.game-stats.tsx"),
 ] satisfies RouteConfig;

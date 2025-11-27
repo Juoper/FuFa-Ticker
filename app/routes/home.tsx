@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Form, useLoaderData, useRevalidator } from "react-router";
+import { Form, useFetcher, useLoaderData, useRevalidator } from "react-router";
 import type { Route } from "./+types/home";
 import { getUserFromRequest, createUser, createUserCookie } from "~/lib/session.server";
 import { prisma } from "~/lib/db.server";
@@ -199,6 +199,7 @@ export default function Home() {
   const { user, posts, timetableEntries } = useLoaderData<typeof loader>();
   const [postContent, setPostContent] = useState("");
   const revalidator = useRevalidator();
+  const fetcher = useFetcher();
 
   // WebSocket for real-time updates
   const handleWebSocketMessage = useCallback((message: any) => {
@@ -207,7 +208,11 @@ export default function Home() {
     }
   }, [revalidator]);
 
-  const { isConnected, connectionStatus } = useWebSocket(handleWebSocketMessage);
+  const { isConnected, connectionStatus } = useWebSocket(
+    handleWebSocketMessage,
+    user?.id,
+    user?.name
+  );
 
   if (!user) {
     return (

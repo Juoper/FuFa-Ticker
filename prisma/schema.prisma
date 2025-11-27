@@ -21,6 +21,8 @@ model User {
   memeVotes    MemeVote[]
   gamePlayers  GamePlayer[]
   gameStats    GameStats[]
+  questions    Question[]
+  questionUpvotes QuestionUpvote[]
 }
 
 model Post {
@@ -128,3 +130,28 @@ model GameStats {
   @@index([gameType])
 }
 
+model Question {
+  id        String   @id @default(cuid())
+  content   String
+  userId    String
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  upvotes   QuestionUpvote[]
+  
+  @@index([userId])
+}
+
+model QuestionUpvote {
+  id         String   @id @default(cuid())
+  questionId String
+  userId     String
+
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, userId])
+  @@index([questionId])
+  @@index([userId])
+}
