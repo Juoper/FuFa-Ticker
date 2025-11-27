@@ -79,16 +79,59 @@ export function Timetable({ entries }: TimetableProps) {
     })
   );
 
-  // Set initial scroll position to show 8:00 to 12:00 by default
+  // Auto-scroll to current day and time
   useEffect(() => {
-    if (scrollContainerRef.current) {
-      // Calculate scroll position to start at 8:00
-      // Hours from start (2:00) to default start (8:00) = 6 hours
-      const hoursFromStart = DEFAULT_VISIBLE_START_HOUR - START_HOUR;
-      const scrollPercentage = hoursFromStart / TOTAL_HOURS;
-      const totalHeight = scrollContainerRef.current.scrollHeight;
-      scrollContainerRef.current.scrollTop = totalHeight * scrollPercentage;
-    }
+    // Use a small delay to ensure DOM is fully rendered
+    const timer = setTimeout(() => {
+      if (!scrollContainerRef.current) return;
+      
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0 = Sunday, 5 = Friday, 6 = Saturday
+      const currentHour = now.getHours();
+      
+      // Determine which day to scroll to
+      let targetDayKey = 'friday';
+      if (dayOfWeek === 6) {
+        targetDayKey = 'saturday';
+      } else if (dayOfWeek === 0) {
+        targetDayKey = 'sunday';
+      } else if (dayOfWeek === 5) {
+        targetDayKey = 'friday';
+      }
+      
+      // Find the target day section
+      const targetDaySection = dayColumnRefs.current[targetDayKey];
+      if (targetDaySection) {
+        const container = scrollContainerRef.current;
+        
+        // Get the position relative to the scroll container
+        const containerRect = container.getBoundingClientRect();
+        const sectionRect = targetDaySection.getBoundingClientRect();
+        const sectionTop = sectionRect.top - containerRect.top + container.scrollTop;
+        
+        // Get day-specific info
+        const dayStartHour = parseInt(targetDaySection.getAttribute('data-day-start') || String(START_HOUR));
+        const dayHours = parseInt(targetDaySection.getAttribute('data-day-hours') || String(TOTAL_HOURS));
+        
+        // Calculate time offset within the day
+        let timeOffset = 0;
+        if (dayOfWeek >= 5 || dayOfWeek === 0) {
+          // We're in the weekend, scroll to current time
+          if (currentHour >= dayStartHour && currentHour <= dayStartHour + dayHours) {
+            const minutesFromDayStart = (currentHour - dayStartHour) * 60;
+            const totalDayMinutes = dayHours * 60;
+            const dayHeight = targetDaySection.offsetHeight;
+            timeOffset = (minutesFromDayStart / totalDayMinutes) * dayHeight;
+          }
+        }
+        
+        // Scroll to position (subtract some offset to center it better in viewport)
+        const scrollPosition = sectionTop + timeOffset - 100;
+        container.scrollTop = Math.max(0, scrollPosition);
+      }
+    }, 100);
+    
+    return () => clearTimeout(timer);
   }, []);
 
   const activeEntry = activeId
@@ -113,25 +156,36 @@ export function Timetable({ entries }: TimetableProps) {
       return;
     }
 
-    // Extract day from the droppable id (format: "day-column-{day}")
+    // Extract day from the droppable id (format: "day-section-{day}")
     const overId = over.id.toString();
-    const newDay = overId.replace('day-column-', '');
+    const newDay = overId.replace('day-section-', '');
 
-    // Calculate new time based on Y position within the column
-    const dayColumn = dayColumnRefs.current[newDay];
-    if (!dayColumn) {
+    // Calculate new time based on Y position within the day section
+    const daySection = dayColumnRefs.current[newDay];
+    if (!daySection) {
       setActiveId(null);
       return;
     }
 
-    const rect = dayColumn.getBoundingClientRect();
-    const relativeY = mouseY - rect.top;
-    const percentage = Math.max(0, Math.min(100, (relativeY / rect.height) * 100));
-    const totalMinutes = TOTAL_HOURS * 60;
-    const newMinutes = Math.round((percentage / 100) * totalMinutes);
+    // Get day-specific time range from data attributes
+    const dayStartHour = parseInt(daySection.getAttribute('data-day-start') || String(START_HOUR));
+    const dayHours = parseInt(daySection.getAttribute('data-day-hours') || String(TOTAL_HOURS));
+
+    const rect = daySection.getBoundingClientRect();
+    const topPadding = 16; // Same as the container padding
+    const relativeY = mouseY - rect.top - topPadding; // Subtract the padding from the top
+    const effectiveHeight = rect.height - topPadding; // Height without padding
+    const percentage = Math.max(0, Math.min(100, (relativeY / effectiveHeight) * 100));
+    const totalDayMinutes = dayHours * 60;
+    const minutesFromDayStart = Math.round((percentage / 100) * totalDayMinutes);
     // Snap to 5-minute intervals
-    const snappedMinutes = Math.round(newMinutes / 5) * 5;
-    const newStartTime = minutesToTime(snappedMinutes);
+    const snappedMinutes = Math.round(minutesFromDayStart / 5) * 5;
+    
+    // Convert to actual time
+    const totalMinutes = dayStartHour * 60 + snappedMinutes;
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const mins = totalMinutes % 60;
+    const newStartTime = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
 
     // Calculate new end time by maintaining the duration
     let newEndTime: string | null = null;
@@ -139,8 +193,10 @@ export function Timetable({ entries }: TimetableProps) {
       const [oldStartHours, oldStartMins] = entry.startTime.split(':').map(Number);
       const [oldEndHours, oldEndMins] = entry.endTime.split(':').map(Number);
       const durationMinutes = (oldEndHours * 60 + oldEndMins) - (oldStartHours * 60 + oldStartMins);
-      const newEndMinutes = snappedMinutes + durationMinutes;
-      newEndTime = minutesToTime(newEndMinutes);
+      const newEndTotalMinutes = totalMinutes + durationMinutes;
+      const endHours = Math.floor(newEndTotalMinutes / 60) % 24;
+      const endMins = newEndTotalMinutes % 60;
+      newEndTime = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
     }
 
     // Only update if something changed
@@ -174,8 +230,8 @@ export function Timetable({ entries }: TimetableProps) {
   }, {} as Record<string, TimetableEntry[]>);
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-6 mb-6 max-w-7xl mx-auto">
-      <h2 className="text-3xl font-bold mb-6">Wochenend-Zeitplan</h2>
+    <div className="bg-white rounded-lg shadow-lg p-2 sm:p-6 mb-6 mx-auto">
+      <h2 className="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6 px-2">Wochenend-Zeitplan</h2>
 
       <DndContext
         sensors={sensors}
@@ -186,54 +242,23 @@ export function Timetable({ entries }: TimetableProps) {
         <div className="relative">
           <div
             ref={scrollContainerRef}
-            className="overflow-y-auto"
+            className="overflow-y-auto scroll-smooth"
             style={{ 
-              maxHeight: '560px', // Shows ~4 hours (8:00 to 12:00) with doubled height
+              maxHeight: 'calc(100vh - 200px)',
+              WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
             }}
           >
-          <div
-            className="grid gap-4 relative"
-            style={{ 
-              minHeight: '2400px', // Total height for 21 hours (2:00 to 23:00) - doubled for more zoom
-              gridTemplateColumns: 'auto 1fr 1fr 1fr'
-            }}
-          >
-          {/* Time scale column */}
-          <div className="relative">
-            <div className="h-12 flex items-center justify-center font-bold text-lg border-b">
-              Zeit
+            <div className="relative">
+              {/* Vertically stacked day sections */}
+              {DAYS.map((day) => (
+                <DaySection
+                  key={day.key}
+                  day={day}
+                  entries={entriesByDay[day.key] || []}
+                  setRef={(ref) => { dayColumnRefs.current[day.key] = ref; }}
+                />
+              ))}
             </div>
-            <div className="relative" style={{ height: 'calc(100% - 48px)' }}>
-              {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => {
-                const hour = (START_HOUR + i) % 24;
-                const percent = (i / TOTAL_HOURS) * 100;
-                return (
-                  <div
-                    key={i}
-                    className="absolute left-0 right-0 text-base font-medium text-gray-600 flex items-center"
-                    style={{ 
-                      top: `${percent}%`,
-                      transform: 'translateY(-50%)'
-                    }}
-                  >
-                    <span className="mr-2 whitespace-nowrap">{hour.toString().padStart(2, '0')}:00</span>
-                    <div className="flex-1 border-t border-gray-200" />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Day columns */}
-          {DAYS.map((day) => (
-            <DayColumn
-              key={day.key}
-              day={day}
-              entries={entriesByDay[day.key] || []}
-              setRef={(ref) => { dayColumnRefs.current[day.key] = ref; }}
-            />
-          ))}
-          </div>
           </div>
           {/* Scroll indicator - fade at bottom */}
           <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
@@ -247,7 +272,7 @@ export function Timetable({ entries }: TimetableProps) {
   );
 }
 
-function DayColumn({
+function DaySection({
   day,
   entries,
   setRef,
@@ -257,73 +282,185 @@ function DayColumn({
   setRef: (ref: HTMLDivElement | null) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: `day-column-${day.key}`,
+    id: `day-section-${day.key}`,
   });
 
+  // Calculate the time range for this day based on entries
+  let dayStartHour = DEFAULT_VISIBLE_START_HOUR; // Default to 8:00
+  let dayEndHour = 20; // Default to 20:00
+  
+  if (entries.length > 0) {
+    // Find earliest and latest times
+    const times = entries.flatMap(e => {
+      const times = [e.startTime];
+      if (e.endTime) times.push(e.endTime);
+      return times;
+    });
+    
+    const hourMinutes = times.map(t => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    });
+    
+    const earliestMinutes = Math.min(...hourMinutes);
+    const latestMinutes = Math.max(...hourMinutes);
+    
+    // Round down to nearest hour for start, up for end, with 1 hour padding
+    dayStartHour = Math.max(START_HOUR, Math.floor(earliestMinutes / 60) - 1);
+    dayEndHour = Math.min(END_HOUR, Math.ceil(latestMinutes / 60) + 1);
+  }
+  
+  const dayHours = dayEndHour - dayStartHour;
+  const heightPerHour = 120; // pixels per hour
+  const timelineHeight = dayHours * heightPerHour;
+  const dayHeight = timelineHeight + 16; // Add 16px top padding
+
   return (
-    <div className="relative">
-      <div className="h-12 flex items-center justify-center font-bold text-lg border-b bg-blue-50">
-        {day.label}
+    <div className="mb-6 sm:mb-8">
+      {/* Day header */}
+      <div className="sticky top-0 z-20 bg-blue-500 text-white px-3 py-2 sm:py-3 rounded-t-lg shadow-md">
+        <h3 className="text-lg sm:text-xl font-bold">{day.label}</h3>
       </div>
+      
+      {/* Timeline container */}
       <div
         ref={(node) => {
           setNodeRef(node);
           setRef(node);
         }}
-        className={`relative border border-gray-200 rounded transition ${
-          isOver ? 'bg-blue-50 border-blue-400' : ''
+        className={`relative border-l-2 border-r-2 border-b-2 border-gray-300 rounded-b-lg transition ${
+          isOver ? 'bg-blue-50 border-blue-400' : 'bg-white'
         }`}
-        style={{ height: 'calc(100% - 48px)' }}
+        style={{ 
+          minHeight: `${dayHeight}px`,
+        }}
+        data-day-start={dayStartHour}
+        data-day-hours={dayHours}
       >
-        {/* Grid lines for visual guidance */}
-        {Array.from({ length: TOTAL_HOURS }, (_, i) => {
-          const percent = ((i + 1) / TOTAL_HOURS) * 100;
-          return (
-            <div
-              key={i}
-              className="absolute left-0 right-0 border-t border-gray-100"
-              style={{ top: `${percent}%` }}
-            />
-          );
-        })}
-
+        {/* Time labels and grid lines */}
+        <div className="absolute pointer-events-none z-0" style={{ top: '16px', left: '0', right: '0', bottom: '0' }}>
+          {Array.from({ length: dayHours + 1 }, (_, i) => {
+            const hour = (dayStartHour + i) % 24;
+            const percent = (i / dayHours) * 100;
+            return (
+              <div
+                key={i}
+                className="absolute left-0 right-0"
+                style={{ 
+                  top: `${percent}%`,
+                }}
+              >
+                {/* Time label */}
+                <div className="flex items-start pointer-events-auto">
+                  <span className="text-xs sm:text-sm font-medium text-gray-600 bg-white px-1 sm:px-2 py-0.5 -mt-2 sticky left-0">
+                    {hour.toString().padStart(2, '0')}:00
+                  </span>
+                </div>
+                {/* Horizontal grid line */}
+                <div className="absolute left-0 right-0 border-t border-gray-200" style={{ top: '0' }} />
+              </div>
+            );
+          })}
+        </div>
 
         {/* Events */}
-        {entries.map((entry) => (
-          <DraggableEvent key={entry.id} entry={entry} />
-        ))}
+        <div className="absolute z-10" style={{ top: '16px', left: '50px', right: '8px', bottom: '0' }}>
+          {entries.map((entry, index) => (
+            <DraggableEvent 
+              key={entry.id} 
+              entry={entry} 
+              dayStartHour={dayStartHour} 
+              dayHours={dayHours}
+              allEntries={entries}
+              containerTopPadding={16}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-function DraggableEvent({ entry }: { entry: TimetableEntry }) {
+function DraggableEvent({ 
+  entry, 
+  dayStartHour, 
+  dayHours,
+  allEntries,
+  containerTopPadding,
+}: { 
+  entry: TimetableEntry;
+  dayStartHour: number;
+  dayHours: number;
+  allEntries: TimetableEntry[];
+  containerTopPadding: number;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: entry.id,
   });
 
-  const topPercent = getPositionPercent(entry.startTime);
+  // Calculate position based on day-specific timeline
+  const [hours, minutes] = entry.startTime.split(':').map(Number);
+  const startMinutesFromDayStart = (hours - dayStartHour) * 60 + minutes;
+  const totalDayMinutes = dayHours * 60;
+  // The container now has top padding already applied via positioning, so use full percentage
+  const topPercent = (startMinutesFromDayStart / totalDayMinutes) * 100;
   
   // Calculate height based on duration if endTime exists
   let heightPercent: number | undefined;
+  let durationMinutes = 30; // default
   if (entry.endTime) {
-    const startMinutes = timeToMinutes(entry.startTime);
-    const endMinutes = timeToMinutes(entry.endTime);
-    const durationMinutes = endMinutes - startMinutes;
-    const totalMinutes = TOTAL_HOURS * 60;
-    heightPercent = (durationMinutes / totalMinutes) * 100;
+    const [startHours, startMins] = entry.startTime.split(':').map(Number);
+    const [endHours, endMins] = entry.endTime.split(':').map(Number);
+    durationMinutes = (endHours * 60 + endMins) - (startHours * 60 + startMins);
+    heightPercent = (durationMinutes / totalDayMinutes) * 100;
   }
+
+  // Check for overlapping events and calculate column position
+  const [entryStartH, entryStartM] = entry.startTime.split(':').map(Number);
+  const entryStartMinutes = entryStartH * 60 + entryStartM;
+  const entryEndMinutes = entry.endTime 
+    ? parseInt(entry.endTime.split(':')[0]) * 60 + parseInt(entry.endTime.split(':')[1])
+    : entryStartMinutes + 30;
+
+  // Find overlapping events
+  const overlappingEvents = allEntries.filter(other => {
+    if (other.id === entry.id) return false;
+    
+    const [otherStartH, otherStartM] = other.startTime.split(':').map(Number);
+    const otherStartMinutes = otherStartH * 60 + otherStartM;
+    const otherEndMinutes = other.endTime
+      ? parseInt(other.endTime.split(':')[0]) * 60 + parseInt(other.endTime.split(':')[1])
+      : otherStartMinutes + 30;
+    
+    // Check if time ranges overlap
+    return (entryStartMinutes < otherEndMinutes && entryEndMinutes > otherStartMinutes);
+  });
+
+  // Calculate column index (simple approach: earlier events get left columns)
+  const columnIndex = overlappingEvents.filter(other => {
+    const [otherStartH, otherStartM] = other.startTime.split(':').map(Number);
+    const otherStartMinutes = otherStartH * 60 + otherStartM;
+    return otherStartMinutes < entryStartMinutes || 
+           (otherStartMinutes === entryStartMinutes && other.id < entry.id);
+  }).length;
+
+  const totalColumns = overlappingEvents.length + 1;
+  const columnWidth = totalColumns > 1 ? `${100 / totalColumns}%` : 'calc(100% - 8px)';
+  const leftOffset = totalColumns > 1 ? `${(columnIndex / totalColumns) * 100}%` : '4px';
 
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className="absolute left-1 right-1"
+      className="absolute"
       style={{
         top: `${topPercent}%`,
+        left: leftOffset,
+        width: columnWidth,
         height: heightPercent ? `${heightPercent}%` : 'auto',
         opacity: isDragging ? 0 : 1,
+        paddingRight: totalColumns > 1 ? '4px' : '0',
       }}
     >
       <EventCard entry={entry} />
@@ -335,20 +472,19 @@ function DragOverlayContent({ entry }: { entry: TimetableEntry }) {
   // Calculate height based on duration if endTime exists
   let heightPixels: number | string = 'auto';
   if (entry.endTime) {
-    const startMinutes = timeToMinutes(entry.startTime);
-    const endMinutes = timeToMinutes(entry.endTime);
-    const durationMinutes = endMinutes - startMinutes;
-    const totalMinutes = TOTAL_HOURS * 60;
-    const heightPercent = (durationMinutes / totalMinutes) * 100;
-    // Calculate pixel height based on the full timeline height (2400px)
-    heightPixels = (heightPercent / 100) * 2400;
+    const [startHours, startMins] = entry.startTime.split(':').map(Number);
+    const [endHours, endMins] = entry.endTime.split(':').map(Number);
+    const durationMinutes = (endHours * 60 + endMins) - (startHours * 60 + startMins);
+    // Use 120px per hour (same as in DaySection)
+    heightPixels = (durationMinutes / 60) * 120;
   }
 
   return (
     <div
       style={{
         height: heightPixels,
-        width: '300px',
+        width: 'calc(100vw - 100px)',
+        maxWidth: '400px',
       }}
     >
       <EventCard entry={entry} isDragging />
@@ -380,14 +516,15 @@ function EventCard({
   return (
     <div
       className={`
-        bg-blue-200/70 border-2 border-blue-500 text-gray-800 rounded px-3 text-base cursor-move
-        hover:border-blue-600 hover:bg-blue-300/70 transition shadow h-full flex items-start
+        bg-blue-200/70 border-2 border-blue-500 text-gray-800 rounded px-2 sm:px-3 text-sm sm:text-base cursor-move
+        hover:border-blue-600 hover:bg-blue-300/70 transition shadow flex flex-col sm:flex-row sm:items-start
         ${isDragging ? 'opacity-80' : ''}
-        ${isSmallEntry ? 'py-0' : 'py-2'}
+        ${isSmallEntry ? 'py-1 min-h-[44px]' : 'py-2 min-h-[44px]'}
       `}
+      style={{ touchAction: 'none', height: 'calc(100% - 4px)', marginBottom: '4px' }}
     >
-      <div className="font-semibold text-sm whitespace-nowrap mr-2">{timeRange}</div>
-      <div className="text-sm flex-1 overflow-hidden">{entry.content}</div>
+      <div className="font-semibold text-xs sm:text-sm whitespace-nowrap sm:mr-2">{timeRange}</div>
+      <div className="text-xs sm:text-sm flex-1 overflow-hidden line-clamp-3">{entry.content}</div>
     </div>
   );
 }
