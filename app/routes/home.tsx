@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { Form, useFetcher, useLoaderData, useRevalidator } from "react-router";
 import type { Route } from "./+types/home";
-import { getUserFromRequest, createUser, createUserCookie } from "~/lib/session.server";
+import { getUserFromRequest, createUser, createUserCookie, findUserByName, loginUser } from "~/lib/session.server";
 import { prisma } from "~/lib/db.server";
 import { NamePrompt } from "~/components/NamePrompt";
 import { PostItem } from "~/components/PostItem";
@@ -71,14 +71,65 @@ export async function action({ request }: Route.ActionArgs) {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  // Handle user registration
-  if (intent === "register") {
+  // Handle name checking (step 1 of authentication)
+  if (intent === "check-name") {
     const name = formData.get("name") as string;
     if (!name || !name.trim()) {
       return { error: "Name is required" };
     }
 
-    const user = await createUser(name);
+    const existingUser = await findUserByName(name);
+    
+    if (existingUser) {
+      // User exists, show login form
+      return { step: "login", userName: existingUser.name };
+    } else {
+      // New user, create account and show PIN
+      const user = await createUser(name);
+      return { step: "signup", userName: user.name, generatedPin: user.pin };
+    }
+  }
+
+  // Handle login with PIN
+  if (intent === "login") {
+    const name = formData.get("name") as string;
+    const pin = formData.get("pin") as string;
+
+    if (!name || !pin) {
+      return { error: "Name and PIN are required", step: "login", userName: name };
+    }
+
+    const result = await loginUser(name, pin);
+    
+    if (!result.success) {
+      return { error: result.error, step: "login", userName: name };
+    }
+
+    const cookie = createUserCookie(result.user!.id);
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Set-Cookie": cookie,
+        Location: "/",
+      },
+    });
+  }
+
+  // Handle completing signup (after showing PIN)
+  if (intent === "complete-signup") {
+    const name = formData.get("name") as string;
+    
+    if (!name) {
+      return { error: "Name is required" };
+    }
+
+    const user = await findUserByName(name);
+    
+    if (!user) {
+      return { error: "User not found" };
+    }
+
     const cookie = createUserCookie(user.id);
 
     return new Response(null, {

@@ -54,7 +54,7 @@ export default function App() {
   
   return (
     <>
-      <Navigation userName={user?.name} isAdmin={user?.isAdmin} />
+      <Navigation userName={user?.name} userPin={user?.pin} isAdmin={user?.isAdmin} />
       <Outlet />
     </>
   );

@@ -23,6 +23,7 @@ export async function getUserFromRequest(request: Request) {
       select: {
         id: true,
         name: true,
+        pin: true,
         isAdmin: true,
         createdAt: true,
       },
@@ -35,10 +36,68 @@ export async function getUserFromRequest(request: Request) {
   }
 }
 
+async function generateUniquePin(): Promise<string> {
+  const maxAttempts = 100;
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Generate a random 2-digit PIN (10-99)
+    const pin = String(Math.floor(Math.random() * 90) + 10);
+    
+    // Check if this PIN is already taken
+    const existingUser = await prisma.user.findUnique({
+      where: { pin },
+    });
+    
+    if (!existingUser) {
+      return pin;
+    }
+  }
+  
+  throw new Error("Unable to generate unique PIN after multiple attempts");
+}
+
+export async function findUserByName(name: string) {
+  // Find user with case-insensitive name matching
+  // SQLite doesn't support mode: 'insensitive', so we fetch all users and filter in JS
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      name: true,
+      pin: true,
+      isAdmin: true,
+      createdAt: true,
+    },
+  });
+  
+  const trimmedName = name.trim().toLowerCase();
+  const matchedUser = users.find(
+    (user) => user.name.toLowerCase() === trimmedName
+  );
+  
+  return matchedUser || null;
+}
+
+export async function loginUser(name: string, pin: string) {
+  const user = await findUserByName(name);
+  
+  if (!user) {
+    return { success: false, error: "User not found" };
+  }
+  
+  if (user.pin !== pin) {
+    return { success: false, error: "Incorrect PIN" };
+  }
+  
+  return { success: true, user };
+}
+
 export async function createUser(name: string) {
+  const pin = await generateUniquePin();
+  
   const user = await prisma.user.create({
     data: {
       name: name.trim(),
+      pin,
     },
   });
 
