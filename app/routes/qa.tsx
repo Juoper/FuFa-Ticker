@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { useLoaderData, useRevalidator, useFetcher } from "react-router";
 import type { Route } from "./+types/qa";
-import { getUserFromRequest } from "~/lib/session.server";
+import { getUserFromRequest, createUser, createUserCookie, findUserByName, loginUser } from "~/lib/session.server";
 import { getQuestions, createQuestion, upvoteQuestion, resolveQuestion } from "~/lib/qa.server";
 import { broadcastNewQuestion, broadcastQuestionUpdate } from "~/lib/websocket.server";
 import { QuestionItem, type Question } from "~/components/QuestionItem";
@@ -20,11 +20,81 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 export async function action({ request }: Route.ActionArgs) {
-  const user = await getUserFromRequest(request);
-  if (!user) return { error: "Unauthorized" };
-
   const formData = await request.formData();
   const intent = formData.get("intent");
+
+  // Handle name checking (step 1 of authentication)
+  if (intent === "check-name") {
+    const name = formData.get("name") as string;
+    if (!name || !name.trim()) {
+      return { error: "Name is required" };
+    }
+
+    const existingUser = await findUserByName(name);
+    
+    if (existingUser) {
+      // User exists, show login form
+      return { step: "login", userName: existingUser.name };
+    } else {
+      // New user, create account and show PIN
+      const user = await createUser(name);
+      return { step: "signup", userName: user.name, generatedPin: user.pin };
+    }
+  }
+
+  // Handle login with PIN
+  if (intent === "login") {
+    const name = formData.get("name") as string;
+    const pin = formData.get("pin") as string;
+
+    if (!name || !pin) {
+      return { error: "Name and PIN are required", step: "login", userName: name };
+    }
+
+    const result = await loginUser(name, pin);
+    
+    if (!result.success) {
+      return { error: result.error, step: "login", userName: name };
+    }
+
+    const cookie = createUserCookie(result.user!.id);
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Set-Cookie": cookie,
+        Location: "/qa",
+      },
+    });
+  }
+
+  // Handle completing signup (after showing PIN)
+  if (intent === "complete-signup") {
+    const name = formData.get("name") as string;
+    
+    if (!name) {
+      return { error: "Name is required" };
+    }
+
+    const user = await findUserByName(name);
+    
+    if (!user) {
+      return { error: "User not found" };
+    }
+
+    const cookie = createUserCookie(user.id);
+
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Set-Cookie": cookie,
+        Location: "/qa",
+      },
+    });
+  }
+
+  const user = await getUserFromRequest(request);
+  if (!user) return { error: "Unauthorized" };
 
   if (intent === "add_question") {
     const content = formData.get("content") as string;
