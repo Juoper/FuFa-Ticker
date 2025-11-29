@@ -22,6 +22,7 @@ interface TimetableEntry {
 
 interface TimetableProps {
   entries: TimetableEntry[];
+  isAdmin: boolean;
 }
 
 // Get the date for a weekend day key based on the current week
@@ -86,11 +87,12 @@ function getPositionPercent(time: string): number {
   return (minutes / totalMinutes) * 100;
 }
 
-export function Timetable({ entries }: TimetableProps) {
+export function Timetable({ entries, isAdmin }: TimetableProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mouseY, setMouseY] = useState<number>(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
   const fetcher = useFetcher();
   const dayColumnRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -169,10 +171,16 @@ export function Timetable({ entries }: TimetableProps) {
     : null;
 
   function handleDragStart(event: DragStartEvent) {
+    if (!isAdmin || !isEditMode) return;
     setActiveId(event.active.id as string);
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    if (!isAdmin || !isEditMode) {
+      setActiveId(null);
+      return;
+    }
+    
     const { active, over } = event;
 
     if (!over) {
@@ -251,6 +259,7 @@ export function Timetable({ entries }: TimetableProps) {
   }
 
   function handleDragMove(event: any) {
+    if (!isAdmin || !isEditMode) return;
     if (event.activatorEvent && 'clientY' in event.activatorEvent) {
       const currentY = event.activatorEvent.clientY + event.delta.y;
       setMouseY(currentY);
@@ -286,14 +295,61 @@ export function Timetable({ entries }: TimetableProps) {
       role="region"
       aria-label="Wochenend-Zeitplan"
     >
-      <div className="flex items-center justify-between mb-4 sm:mb-6 px-2">
-        <h2 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
-          Wochenend-Zeitplan
-        </h2>
-        {showSuccess && (
-          <div className="flex items-center gap-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium animate-in fade-in slide-in-from-right-5 duration-300">
-            <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-            Gespeichert
+      <div className="mb-4 sm:mb-6 px-2">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent">
+            Wochenend-Zeitplan
+          </h2>
+          {showSuccess && (
+            <div className="flex items-center gap-2 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 px-3 py-1 rounded-full text-sm font-medium animate-in fade-in slide-in-from-right-5 duration-300">
+              <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+              Gespeichert
+            </div>
+          )}
+        </div>
+        
+        {/* Admin Controls */}
+        {isAdmin && (
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Edit Mode Toggle */}
+            <label className="flex items-center gap-2 cursor-pointer group">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={isEditMode}
+                  onChange={(e) => setIsEditMode(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-300 dark:bg-gray-600 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100">
+                {isEditMode ? '🔓 Bearbeiten aktiv' : '🔒 Nur Ansicht'}
+              </span>
+            </label>
+            
+            {/* Reset Button */}
+            <button
+              onClick={() => {
+                if (confirm('Möchten Sie wirklich alle Zeitplan-Einträge löschen? Diese Aktion kann nicht rückgängig gemacht werden.')) {
+                  fetcher.submit(
+                    { intent: 'reset-timetable' },
+                    { method: 'post' }
+                  );
+                }
+              }}
+              className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors duration-200 flex items-center gap-1.5"
+            >
+              <span>🗑️</span>
+              <span>Zeitplan zurücksetzen</span>
+            </button>
+          </div>
+        )}
+        
+        {/* Non-Admin Badge */}
+        {!isAdmin && (
+          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+            <span>🔒</span>
+            <span>Nur Ansicht</span>
           </div>
         )}
       </div>
@@ -323,6 +379,8 @@ export function Timetable({ entries }: TimetableProps) {
                   setRef={(ref) => { dayColumnRefs.current[day.key] = ref; }}
                   dayIndex={index}
                   onUpdateEntry={handleUpdateEntry}
+                  isAdmin={isAdmin}
+                  isEditMode={isEditMode}
                 />
               ))}
             </div>
@@ -345,12 +403,16 @@ function DaySection({
   setRef,
   dayIndex,
   onUpdateEntry,
+  isAdmin,
+  isEditMode,
 }: {
   day: { key: string; label: string; date: string };
   entries: TimetableEntry[];
   setRef: (ref: HTMLDivElement | null) => void;
   dayIndex: number;
   onUpdateEntry: (entryId: string, day: string, startTime: string, endTime: string) => void;
+  isAdmin: boolean;
+  isEditMode: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-section-${day.key}`,
@@ -510,6 +572,8 @@ function DaySection({
               allEntries={entries}
               containerTopPadding={16}
               onUpdateEntry={onUpdateEntry}
+              isAdmin={isAdmin}
+              isEditMode={isEditMode}
             />
           ))}
         </div>
@@ -525,6 +589,8 @@ function DraggableEvent({
   allEntries,
   containerTopPadding,
   onUpdateEntry,
+  isAdmin,
+  isEditMode,
 }: { 
   entry: TimetableEntry;
   dayStartHour: number;
@@ -532,9 +598,12 @@ function DraggableEvent({
   allEntries: TimetableEntry[];
   containerTopPadding: number;
   onUpdateEntry?: (entryId: string, day: string, startTime: string, endTime: string) => void;
+  isAdmin: boolean;
+  isEditMode: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: entry.id,
+    disabled: !isAdmin || !isEditMode,
   });
 
   const [isResizing, setIsResizing] = useState(false);
@@ -546,7 +615,7 @@ function DraggableEvent({
     e.stopPropagation();
     e.preventDefault(); // Prevent text selection
     
-    if (!onUpdateEntry) return;
+    if (!onUpdateEntry || !isAdmin || !isEditMode) return;
     
     const startY = e.clientY;
     const [startH, startM] = entry.startTime.split(':').map(Number);
@@ -683,11 +752,13 @@ function DraggableEvent({
   // Construct a temporary entry object for the card if resizing
   const displayEntry = isResizing ? { ...entry, endTime: effectiveEndTime } : entry;
 
+  // Conditionally apply drag listeners based on admin and edit mode
+  const dragProps = (isAdmin && isEditMode) ? { ...listeners, ...attributes } : {};
+  
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
+      {...dragProps}
       className={`absolute transition-opacity duration-200 ${isResizing ? 'z-50' : ''}`}
       style={{
         top: `${topPercent}%`,
@@ -703,8 +774,9 @@ function DraggableEvent({
     >
       <EventCard 
         entry={displayEntry} 
-        onResizeStart={onUpdateEntry ? handleResizeStart : undefined}
+        onResizeStart={(onUpdateEntry && isAdmin && isEditMode) ? handleResizeStart : undefined}
         isNarrow={totalColumns > 1}
+        isEditable={isAdmin && isEditMode}
       />
     </div>
   );
@@ -744,11 +816,13 @@ function EventCard({
   isDragging = false,
   onResizeStart,
   isNarrow = false,
+  isEditable = true,
 }: {
   entry: TimetableEntry;
   isDragging?: boolean;
   onResizeStart?: (e: React.PointerEvent) => void;
   isNarrow?: boolean;
+  isEditable?: boolean;
 }) {
   const timeRange = entry.endTime 
     ? `${entry.startTime} - ${entry.endTime}` 
@@ -777,10 +851,10 @@ function EventCard({
         relative overflow-hidden group
         bg-gradient-to-br from-blue-400 to-purple-500 dark:from-blue-500 dark:to-purple-600
         border-2 border-blue-300 dark:border-blue-400
-        text-white rounded-lg cursor-move
+        text-white rounded-lg ${isEditable ? 'cursor-move' : 'cursor-default'}
         shadow-lg hover:shadow-xl
         transition-all duration-300 ease-out
-        hover:scale-[1.02] hover:border-blue-200 dark:hover:border-blue-300
+        ${isEditable ? 'hover:scale-[1.02]' : ''} hover:border-blue-200 dark:hover:border-blue-300
         focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 dark:focus:ring-offset-gray-900
         ${isDragging ? 'opacity-90 scale-105 shadow-2xl' : ''}
         ${isSmallEntry ? 'py-1 px-2 min-h-[48px]' : 'py-2.5 px-3 sm:px-4 min-h-[48px]'}

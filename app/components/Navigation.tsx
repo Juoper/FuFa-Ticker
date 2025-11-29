@@ -16,7 +16,7 @@ export function Navigation({ userName, isAdmin }: NavigationProps) {
             </Link>
             <div className="flex space-x-4">
               <Link
-                to="/"
+                to="/feed"
                 className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition"
               >
                 Feed

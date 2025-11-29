@@ -169,8 +169,12 @@ export async function action({ request }: Route.ActionArgs) {
     return { success: true };
   }
 
-  // Handle timetable entry position update
+  // Handle timetable entry position update (admin only)
   if (intent === "update-timetable-position") {
+    if (!user.isAdmin) {
+      return { error: "Forbidden" };
+    }
+    
     const entryId = formData.get("entryId") as string;
     const day = formData.get("day") as string;
     const startTime = formData.get("startTime") as string;
@@ -187,6 +191,53 @@ export async function action({ request }: Route.ActionArgs) {
         startTime,
         endTime: endTime || null,
       },
+    });
+
+    return { success: true };
+  }
+
+  // Handle timetable reset (admin only)
+  if (intent === "reset-timetable") {
+    if (!user.isAdmin) {
+      return { error: "Forbidden" };
+    }
+
+    // Delete all existing entries
+    await prisma.timetableEntry.deleteMany({});
+
+    // Reseed with default data
+    await prisma.timetableEntry.createMany({
+      data: [
+        // Friday
+        { day: 'friday', startTime: '17:00', endTime: '19:00', content: 'Ankunft Küche?' },
+        { day: 'friday', startTime: '19:00', endTime: '20:00', content: 'Abendessen (flexibel)' },
+        { day: 'friday', startTime: '20:00', endTime: '21:00', content: 'Vorbereitung Versprechen' },
+        { day: 'friday', startTime: '21:00', endTime: '22:00', content: 'Sekani Ankunft + Essen' },
+        { day: 'friday', startTime: '22:00', endTime: '24:00', content: 'Losschicken' },
+        
+        // Saturday
+        { day: 'saturday', startTime: '02:00', endTime: '08:00', content: 'Versprechen (flexibel) / Danach Schlaf' },
+        { day: 'saturday', startTime: '08:00', endTime: '08:20', content: 'Wecken' },
+        { day: 'saturday', startTime: '08:20', endTime: '08:30', content: 'Morgenrunde' },
+        { day: 'saturday', startTime: '08:30', endTime: '09:30', content: 'Frühstück' },
+        { day: 'saturday', startTime: '09:30', endTime: '10:30', content: 'Finanzvortrag' },
+        { day: 'saturday', startTime: '10:30', endTime: '11:30', content: 'Stafu-Wahl' },
+        { day: 'saturday', startTime: '13:00', endTime: '14:30', content: 'Mittagessen' },
+        { day: 'saturday', startTime: '14:30', endTime: '17:00', content: 'Postenverabschiedung / SB-/SV-Postenvergabe' },
+        { day: 'saturday', startTime: '17:00', endTime: '19:00', content: 'Verteilung Jahresberichte / Jahresplanung I' },
+        { day: 'saturday', startTime: '19:00', endTime: '20:00', content: 'Abendessen' },
+        { day: 'saturday', startTime: '20:00', endTime: '21:00', content: 'Freizeit' },
+        
+        // Sunday
+        { day: 'sunday', startTime: '08:00', endTime: '08:20', content: 'Wecken' },
+        { day: 'sunday', startTime: '08:20', endTime: '08:30', content: 'Morgenrunde' },
+        { day: 'sunday', startTime: '08:30', endTime: '09:30', content: 'Frühstück' },
+        { day: 'sunday', startTime: '09:30', endTime: '11:30', content: 'Jahresplanung II' },
+        { day: 'sunday', startTime: '11:30', endTime: '13:00', content: 'Packen + Aufräumen' },
+        { day: 'sunday', startTime: '13:00', endTime: '14:30', content: 'Snack' },
+        { day: 'sunday', startTime: '14:00', endTime: '14:30', content: 'Abfahrt Haus' },
+        { day: 'sunday', startTime: '14:30', endTime: '17:00', content: 'Abschlusskreis' },
+      ],
     });
 
     return { success: true };
@@ -250,7 +301,7 @@ export default function Home() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-6xl">
       {/* Timetable */}
-      <Timetable entries={timetableEntries} />
+      <Timetable entries={timetableEntries} isAdmin={user.isAdmin} />
 
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-6">
