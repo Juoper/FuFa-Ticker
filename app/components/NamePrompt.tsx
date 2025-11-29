@@ -35,7 +35,7 @@ export function NamePrompt() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Your name"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4 text-gray-900 bg-white placeholder:text-gray-500"
               required
               autoFocus
             />
@@ -75,7 +75,7 @@ export function NamePrompt() {
               value={pin}
               onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 2))}
               placeholder="Enter your 2-digit PIN"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4 text-center text-2xl tracking-widest"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4 text-center text-2xl tracking-widest text-gray-900 bg-white placeholder:text-gray-500"
               maxLength={2}
               pattern="\d{2}"
               required

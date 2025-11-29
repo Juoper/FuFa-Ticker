@@ -83,7 +83,7 @@ export function PostItem({ post, isAdmin, depth = 0 }: PostItemProps) {
               value={replyContent}
               onChange={(e) => setReplyContent(e.target.value)}
               placeholder="Write a reply..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-900 bg-white placeholder:text-gray-500"
               rows={2}
               required
             />

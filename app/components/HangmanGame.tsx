@@ -178,7 +178,7 @@ export function HangmanGame({
                 onChange={(e) => setWordInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSubmitWord()}
                 placeholder="Enter word or phrase..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white placeholder:text-gray-500"
                 autoFocus
               />
               <button
